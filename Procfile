@@ -1,0 +1,1 @@
+web: gunicorn wif_system.app:app
