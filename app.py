@@ -393,28 +393,32 @@ def mark_paid(ip_address):
 
 def daily_status_check():
     db = SessionLocal()
-    today = datetime.utcnow()
-    customers = db.query(Customer).all()
+    try:
+        today = datetime.utcnow()
+        customers = db.query(Customer).all()
+        for customer in customers:
+            subscription_end = customer.start_date + timedelta(days=30)
+            grace_end = subscription_end + timedelta(days=customer.grace_days)
 
-    for customer in customers:
-        subscription_end = customer.start_date + timedelta(days=30)
-        grace_end = subscription_end + timedelta(days=customer.grace_days)
+            if today <= subscription_end:
+                customer.status = "active"
+                customer.popup_shown = 0
+            elif subscription_end < today <= grace_end:
+                customer.status = "grace"
+            else:
+                customer.status = "suspended"
+                customer.popup_shown = 1
+        db.commit()
+    finally:
+        db.close()
 
-        if today <= subscription_end:
-            # Subscription active
-            customer.status = "active"
-            customer.popup_shown = 0  # Reset popup for active users
-        elif subscription_end < today <= grace_end:
-            # Grace period
-            customer.status = "grace"
-            # Do not reset popup_shown if already set
-        else:
-            # Beyond grace period → suspend immediately
-            customer.status = "suspended"
-            customer.popup_shown = 1  # Ensure no popup is shown
-
-    db.commit()
-    db.close()
+def run_scheduler():
+    while True:
+        try:
+            daily_status_check()
+        except Exception as e:
+            print(f"[Scheduler Error] {e}")
+        time.sleep(30)
 
 
 # ==================== RUN DAILY CHECK THREAD ====================
