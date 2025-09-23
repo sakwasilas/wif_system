@@ -392,10 +392,11 @@ def mark_paid(ip_address):
     return redirect(url_for("list_customers"))
 
 def daily_status_check():
-    db = SessionLocal()
-    try:
-        today = datetime.utcnow()
+    today = datetime.utcnow()
+
+    with SessionLocal() as db:
         customers = db.query(Customer).all()
+
         for customer in customers:
             subscription_end = customer.start_date + timedelta(days=30)
             grace_end = subscription_end + timedelta(days=customer.grace_days)
@@ -408,17 +409,8 @@ def daily_status_check():
             else:
                 customer.status = "suspended"
                 customer.popup_shown = 1
-        db.commit()
-    finally:
-        db.close()
 
-def run_scheduler():
-    while True:
-        try:
-            daily_status_check()
-        except Exception as e:
-            print(f"[Scheduler Error] {e}")
-        time.sleep(30)
+        db.commit()
 
 
 # ==================== RUN DAILY CHECK THREAD ====================
@@ -426,7 +418,8 @@ def run_scheduler():
     while True:
         daily_status_check()
        
-        time.sleep(30) 
+        time.sleep(86400)
+
 
 threading.Thread(target=run_scheduler, daemon=True).start()
 
