@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subscription Reminder</title>
+    <!-- Optional: Bootstrap CDN for styling -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: Arial, sans-serif;
+        }
+        .popup-container {
+            max-width: 500px;
+            margin: 100px auto;
+            padding: 30px;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+        h3 {
+            margin-bottom: 20px;
+            color: #343a40;
+        }
+        p {
+            font-size: 1.1rem;
+            margin-bottom: 25px;
+        }
+        .btn-primary {
+            padding: 10px 25px;
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="popup-container">
+    <h3>Hello {{ customer.name }}!</h3>
+    <p>Your subscription will expire in <strong>{{ days_left }}</strong> day(s).</p>
+    <p>Please make payment to continue uninterrupted service.</p>
+    <a href="{{ url_for('wifi_home', ip_address=customer.ip_address) }}" class="btn btn-primary">OK</a>
+</div>
+
+</body>
+</html>
