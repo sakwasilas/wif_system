@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from connections import Base
-from datetime import datetime
+from datetime import datetime, UTC
 
 # ==================== USER MODEL ====================
 class User(Base):
@@ -27,13 +27,13 @@ class Customer(Base):
     location = Column(String(255))
     ip_address = Column(String(50), nullable=False, unique=True)
     billing_amount = Column(Float, nullable=False)
-    start_date = Column(DateTime, default=datetime.utcnow)
+    start_date = Column(DateTime, default=lambda: datetime.now(UTC))
     grace_days = Column(Integer, default=0)
     status = Column(String(50), default="active")
     popup_shown = Column(Boolean, default=False)
-    pre_expiry_popup_shown = Column(Boolean, default=False)
+    pre_expiry_popup_shown = Column(Boolean, default=False)  # ✅ New column
     account_no = Column(String(50), nullable=False, unique=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     # One-to-one relationship with network info
     network = relationship("CustomerNetwork", back_populates="customer", uselist=False)
@@ -49,7 +49,7 @@ class CustomerNetwork(Base):
     router_no = Column(String(50))
     loop_no = Column(String(50))
     power_level = Column(String(50))
-    #signal_strength = Column(String(50))
+    # signal_strength = Column(String(50))
     coordinates = Column(String(255))
 
     # Back reference to customer
