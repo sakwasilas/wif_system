@@ -1,6 +1,8 @@
-from connections import Base, engine, SessionLocal
-from models import User, Customer
+from connections import Base, engine
+from models import *
 
-
+# ⚠️ Drops all existing tables and recreates them
+Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
-print("Tables created successfully!")
+
+print("Tables recreated with latest columns")
