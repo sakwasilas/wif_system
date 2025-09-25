@@ -413,6 +413,46 @@ def mark_paid(ip_address):
         db.close()
     return redirect(url_for("list_customers"))
 
+
+''' my search criteria'''
+@app.route("/customers", methods=["GET"])
+def list_customers():
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    db = SessionLocal()
+    try:
+        query = db.query(Customer).options(joinedload(Customer.network))
+
+        # Get search term
+        search_term = request.args.get("search", "").strip()
+
+        if search_term:
+            query = query.filter(
+                (Customer.account_no.ilike(f"%{search_term}%")) |
+                (Customer.name.ilike(f"%{search_term}%")) |
+                (Customer.ip_address.ilike(f"%{search_term}%"))
+            )
+
+        # Pagination
+        page = int(request.args.get("page", 1))
+        per_page = 5
+        total = query.count()
+        customers = query.offset((page - 1) * per_page).limit(per_page).all()
+        has_next = total > page * per_page
+    finally:
+        db.close()
+
+    return render_template(
+        "admin/list_customer.html",
+        customers=customers,
+        page=page,
+        total=total,
+        has_next=has_next,
+        search_term=search_term
+    )
+
+
 # ==================== DAILY STATUS CHECK ====================
 def daily_status_check():
     today = datetime.utcnow()

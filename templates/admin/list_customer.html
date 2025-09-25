@@ -22,6 +22,17 @@
 
     <h2 class="mb-3">Customer List</h2>
 
+    <!-- 🔍 Search Form -->
+    <form method="get" action="{{ url_for('list_customers') }}" class="mb-3 d-flex">
+        <input type="text" name="search" class="form-control me-2" 
+               placeholder="Search by Account No, Name, or IP Address" 
+               value="{{ search_term }}">
+        <button type="submit" class="btn btn-primary me-2">Search</button>
+        {% if search_term %}
+          <a href="{{ url_for('list_customers') }}" class="btn btn-secondary">Reset</a>
+        {% endif %}
+    </form>
+
     <div class="table-responsive">
         <table class="table table-striped table-bordered shadow-sm table-hover align-middle text-center">
             <thead class="table-dark">
@@ -91,19 +102,19 @@
         <ul class="pagination justify-content-center flex-wrap">
             {% if page > 1 %}
             <li class="page-item">
-                <a class="page-link" href="{{ url_for('list_customers', page=page-1) }}">Previous</a>
+                <a class="page-link" href="{{ url_for('list_customers', page=page-1, search=search_term) }}">Previous</a>
             </li>
             {% endif %}
 
             {% for p in range(1, (total // per_page) + 2) %}
             <li class="page-item {% if p == page %}active{% endif %}">
-                <a class="page-link" href="{{ url_for('list_customers', page=p) }}">{{ p }}</a>
+                <a class="page-link" href="{{ url_for('list_customers', page=p, search=search_term) }}">{{ p }}</a>
             </li>
             {% endfor %}
 
             {% if has_next %}
             <li class="page-item">
-                <a class="page-link" href="{{ url_for('list_customers', page=page+1) }}">Next</a>
+                <a class="page-link" href="{{ url_for('list_customers', page=page+1, search=search_term) }}">Next</a>
             </li>
             {% endif %}
         </ul>
