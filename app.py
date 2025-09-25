@@ -231,8 +231,6 @@ def add_customer():
 
     return render_template("admin/add_new_customer.html")
 
-
-
 from sqlalchemy.orm import joinedload  # make sure this is at the top
 
 @app.route("/customers")
@@ -244,8 +242,21 @@ def list_customers():
     try:
         page = int(request.args.get("page", 1))
         per_page = 5
+
+        # Base query
         query = db.query(Customer).options(joinedload(Customer.network))
-        total = query.count()  # total number of customers
+
+        # Search term (optional)
+        search_term = request.args.get("search", "").strip()
+        if search_term:
+            query = query.filter(
+                (Customer.account_no.ilike(f"%{search_term}%")) |
+                (Customer.name.ilike(f"%{search_term}%")) |
+                (Customer.ip_address.ilike(f"%{search_term}%"))
+            )
+
+        # Pagination
+        total = query.count()
         customers = query.offset((page - 1) * per_page).limit(per_page).all()
         has_next = total > page * per_page
     finally:
@@ -255,10 +266,14 @@ def list_customers():
         "admin/list_customer.html",
         customers=customers,
         page=page,
-        per_page=per_page,   # <-- add this
-        total=total,         # <-- add this
-        has_next=has_next
+        per_page=per_page,
+        total=total,
+        has_next=has_next,
+        search_term=search_term  # ✅ pass to template
     )
+
+
+
 
 @app.route("/edit_customer/<int:customer_id>", methods=["GET", "POST"])
 def edit_customer(customer_id):
@@ -413,44 +428,69 @@ def mark_paid(ip_address):
         db.close()
     return redirect(url_for("list_customers"))
 
+#=====================export to excel========================
+import pandas as pd
+from flask import send_file
+import io
 
-''' my search criteria'''
-@app.route("/customers", methods=["GET"])
-def list_customers():
+@app.route("/customers/export", methods=["GET"])
+def export_customers():
     if not session.get("user_id"):
         return redirect(url_for("login"))
+
+    search_term = request.args.get("search", "").strip()
 
     db = SessionLocal()
     try:
         query = db.query(Customer).options(joinedload(Customer.network))
 
-        # Get search term
-        search_term = request.args.get("search", "").strip()
-
+        # Apply search filter if present
         if search_term:
             query = query.filter(
-                (Customer.account_no.ilike(f"%{search_term}%")) |
-                (Customer.name.ilike(f"%{search_term}%")) |
-                (Customer.ip_address.ilike(f"%{search_term}%"))
+                (Customer.account_no.like(f"%{search_term}%")) |
+                (Customer.name.like(f"%{search_term}%")) |
+                (Customer.ip_address.like(f"%{search_term}%"))
             )
 
-        # Pagination
-        page = int(request.args.get("page", 1))
-        per_page = 5
-        total = query.count()
-        customers = query.offset((page - 1) * per_page).limit(per_page).all()
-        has_next = total > page * per_page
+        customers = query.all()
+
+        # Convert to list of dicts for Excel
+        data = []
+        for c in customers:
+            data.append({
+                "Account No": c.account_no,
+                "Name": c.name,
+                "Phone": c.phone,
+                "Email": c.email,
+                "Location": c.location,
+                "IP Address": c.ip_address,
+                "Billing Amount": c.billing_amount,
+                "Cable No": c.network.cable_no if c.network else "",
+                "Loop No": c.network.loop_no if c.network else "",
+                "Power Level": c.network.power_level if c.network else "",
+                "Coordinates": c.network.coordinates if c.network else "",
+                "Status": c.status,
+                "Created At": c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else ""
+            })
+
+        df = pd.DataFrame(data)
+
+        # Save to in-memory Excel file
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Customers")
+        output.seek(0)
     finally:
         db.close()
 
-    return render_template(
-        "admin/list_customer.html",
-        customers=customers,
-        page=page,
-        total=total,
-        has_next=has_next,
-        search_term=search_term
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="customers.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
 
 
 # ==================== DAILY STATUS CHECK ====================
