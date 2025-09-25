@@ -1,11 +1,31 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from werkzeug.security import generate_password_hash, check_password_hash
-from connections import SessionLocal
-from models import User, Customer, CustomerNetwork
-from datetime import datetime, timedelta
+# ==================== STANDARD LIBRARY ====================
 import threading
 import time
 import random
+import io
+from datetime import datetime, timedelta
+
+# ==================== FLASK ====================
+from flask import (
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    session,
+    flash,
+    send_file
+)
+
+# ==================== THIRD-PARTY ====================
+from werkzeug.security import generate_password_hash, check_password_hash
+from openpyxl import Workbook
+from sqlalchemy.orm import joinedload
+
+# ==================== LOCAL MODULES ====================
+from connections import SessionLocal
+from models import User, Customer, CustomerNetwork
+
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -429,9 +449,7 @@ def mark_paid(ip_address):
     return redirect(url_for("list_customers"))
 
 #=====================export to excel========================
-from flask import send_file, request, flash
-from openpyxl import Workbook
-import io
+
 from sqlalchemy.orm import joinedload
 
 @app.route("/customers/export", methods=["GET"])
