@@ -429,9 +429,10 @@ def mark_paid(ip_address):
     return redirect(url_for("list_customers"))
 
 #=====================export to excel========================
-import pandas as pd
-from flask import send_file
+from flask import send_file, request, flash
+from openpyxl import Workbook
 import io
+from sqlalchemy.orm import joinedload
 
 @app.route("/customers/export", methods=["GET"])
 def export_customers():
@@ -454,31 +455,40 @@ def export_customers():
 
         customers = query.all()
 
-        # Convert to list of dicts for Excel
-        data = []
+        # Create Excel workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Customers"
+
+        # Header row
+        headers = [
+            "Account No", "Name", "Phone", "Email", "Location", "IP Address",
+            "Billing Amount", "Cable No", "Loop No", "Power Level",
+            "Coordinates", "Status", "Created At"
+        ]
+        ws.append(headers)
+
+        # Data rows
         for c in customers:
-            data.append({
-                "Account No": c.account_no,
-                "Name": c.name,
-                "Phone": c.phone,
-                "Email": c.email,
-                "Location": c.location,
-                "IP Address": c.ip_address,
-                "Billing Amount": c.billing_amount,
-                "Cable No": c.network.cable_no if c.network else "",
-                "Loop No": c.network.loop_no if c.network else "",
-                "Power Level": c.network.power_level if c.network else "",
-                "Coordinates": c.network.coordinates if c.network else "",
-                "Status": c.status,
-                "Created At": c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else ""
-            })
+            ws.append([
+                c.account_no,
+                c.name,
+                c.phone,
+                c.email,
+                c.location,
+                c.ip_address,
+                c.billing_amount,
+                c.network.cable_no if c.network else "",
+                c.network.loop_no if c.network else "",
+                c.network.power_level if c.network else "",
+                c.network.coordinates if c.network else "",
+                c.status,
+                c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else ""
+            ])
 
-        df = pd.DataFrame(data)
-
-        # Save to in-memory Excel file
+        # Save workbook to in-memory file
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Customers")
+        wb.save(output)
         output.seek(0)
     finally:
         db.close()
