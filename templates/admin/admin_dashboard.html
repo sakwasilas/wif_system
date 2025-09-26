@@ -86,6 +86,7 @@
                     <a href="{{ url_for('list_customers') }}" class="btn btn-primary btn-sm w-100 mb-3">📋 View Customers</a>
 
                     <!-- User Management (Super Admin only) -->
+                     <hr>
                     {% if session.role == "super_admin" %}
                     <a href="{{ url_for('manage_users') }}" class="btn btn-warning btn-sm w-100 mb-2">👥 Manage Users</a>
                     <a href="{{ url_for('pending_users') }}" class="btn btn-danger btn-sm w-100 mb-3">🔑 Pending Admins</a>
