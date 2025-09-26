@@ -26,7 +26,7 @@ from sqlalchemy.orm import joinedload
 from connections import SessionLocal
 from models import User, Customer, CustomerNetwork
 
-
+# ==================== FLASK APP ====================
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
@@ -166,11 +166,30 @@ def register():
             db.close()
     return render_template("register.html")
 
+# ==================== ADMIN DASHBOARD ====================
 @app.route("/admin_dashboard")
 def admin_dashboard():
     if not session.get("user_id"):
         return redirect(url_for("login"))
-    return render_template("admin/admin_dashboard.html", username=session.get("username"))
+
+    db = SessionLocal()
+    try:
+        total_users = db.query(Customer).count()
+        active_users = db.query(Customer).filter_by(status="active").count()
+        grace_users = db.query(Customer).filter_by(status="grace").count()
+        suspended_users = db.query(Customer).filter_by(status="suspended").count()
+
+        return render_template("admin/admin_dashboard.html",
+            username=session.get("username"),
+            role=session.get("role"),
+            total_users=total_users,
+            active_users=active_users,
+            grace_users=grace_users,
+            suspended_users=suspended_users,
+            datetime=datetime  
+        )
+    finally:
+        db.close()
 
 # ==================== CUSTOMER CRUD ====================
 @app.route("/customers/add", methods=["GET", "POST"])
@@ -190,7 +209,6 @@ def add_customer():
         router_no = request.form.get("router_no")
         loop_no = request.form.get("loop_no")
         power_level = request.form.get("power_level")
-        signal_strength = request.form.get("signal_strength")
         coordinates = request.form.get("coordinates")
 
         if not name or not phone or not billing_amount or not ip_address or not account_no:
@@ -199,19 +217,16 @@ def add_customer():
 
         db = SessionLocal()
         try:
-            # Check if account number already exists
             existing_account = db.query(Customer).filter_by(account_no=account_no).first()
             if existing_account:
                 flash(f"Account number {account_no} already exists! Choose a different one.", "danger")
                 return redirect(url_for("add_customer"))
 
-            # Check if IP address already exists
             existing_ip = db.query(Customer).filter_by(ip_address=ip_address).first()
             if existing_ip:
                 flash(f"IP address {ip_address} has already been assigned to another customer!", "danger")
                 return redirect(url_for("add_customer"))
 
-            # Create new customer
             start_date = datetime.utcnow()
             new_customer = Customer(
                 name=name,
@@ -228,16 +243,14 @@ def add_customer():
                 pre_expiry_popup_shown=False
             )
             db.add(new_customer)
-            db.commit()  # commit to get new_customer.id
+            db.commit()
 
-            # Add network info
             network = CustomerNetwork(
                 customer_id=new_customer.id,
                 cable_no=cable_no,
                 router_no=router_no,
                 loop_no=loop_no,
                 power_level=power_level,
-                #signal_strength=signal_strength,
                 coordinates=coordinates
             )
             db.add(network)
@@ -245,14 +258,12 @@ def add_customer():
 
             flash("Customer added successfully!", "success")
             return redirect(url_for("list_customers"))
-
         finally:
             db.close()
 
     return render_template("admin/add_new_customer.html")
 
-from sqlalchemy.orm import joinedload  # make sure this is at the top
-
+# ==================== LIST / EDIT / DELETE CUSTOMERS ====================
 @app.route("/customers")
 def list_customers():
     if not session.get("user_id"):
@@ -262,11 +273,7 @@ def list_customers():
     try:
         page = int(request.args.get("page", 1))
         per_page = 5
-
-        # Base query
         query = db.query(Customer).options(joinedload(Customer.network))
-
-        # Search term (optional)
         search_term = request.args.get("search", "").strip()
         if search_term:
             query = query.filter(
@@ -274,8 +281,6 @@ def list_customers():
                 (Customer.name.ilike(f"%{search_term}%")) |
                 (Customer.ip_address.ilike(f"%{search_term}%"))
             )
-
-        # Pagination
         total = query.count()
         customers = query.offset((page - 1) * per_page).limit(per_page).all()
         has_next = total > page * per_page
@@ -289,11 +294,8 @@ def list_customers():
         per_page=per_page,
         total=total,
         has_next=has_next,
-        search_term=search_term  # ✅ pass to template
+        search_term=search_term
     )
-
-
-
 
 @app.route("/edit_customer/<int:customer_id>", methods=["GET", "POST"])
 def edit_customer(customer_id):
@@ -321,7 +323,6 @@ def edit_customer(customer_id):
                 network.router_no = request.form.get("router_no")
                 network.loop_no = request.form.get("loop_no")
                 network.power_level = request.form.get("power_level")
-                #network.signal_strength = request.form.get("signal_strength")
                 network.coordinates = request.form.get("coordinates")
 
             db.commit()
@@ -366,127 +367,175 @@ def grace_popup(ip_address):
     if not customer:
         db.close()
         return "Customer not found", 404
-    if request.method == "POST":
-        selected_days = int(request.form.get("grace_days", 1))
-        customer.grace_days = selected_days
-        customer.popup_shown = True
-        db.commit()
+
+    # 🚫 Prevent user from re-using the grace popup
+    if customer.popup_shown:
         db.close()
-        flash(f"Grace period selected: {selected_days} day(s)", "success")
-        return redirect(url_for("wifi_home", ip_address=ip_address))
-    db.close()
-    return render_template("customer/grace_popup.html", customer=customer)
+        flash("Grace period has already been selected.", "warning")
+        return redirect(url_for("wifi_access", ip_address=ip_address))
+
+    if request.method == "POST":
+        try:
+            selected_days = int(request.form.get("grace_days", 1))
+            # ✅ Enforce allowed grace days (optional but recommended)
+            if selected_days not in [1, 2, 3,4,5]:
+                flash("Invalid grace period selected.", "danger")
+                return redirect(url_for("grace_popup", ip_address=ip_address))
+
+            customer.grace_days = selected_days
+            customer.popup_shown = True
+            db.commit()
+            flash(f"Grace period selected: {selected_days} day(s)", "success")
+            return redirect(url_for("wifi_access", ip_address=ip_address))
+        except Exception as e:
+            db.rollback()
+            flash(f"Error: {str(e)}", "danger")
+        finally:
+            db.close()
+    else:
+        db.close()
+        return render_template("customer/grace_popup.html", customer=customer)
+
 
 @app.route("/wifi_access/<ip_address>")
-def wifi_home(ip_address):
+def wifi_access(ip_address):
     db = SessionLocal()
     customer = db.query(Customer).filter_by(ip_address=ip_address).first()
     if not customer:
         db.close()
         return "Customer not found", 404
+
     today = datetime.utcnow()
     subscription_end = customer.start_date + timedelta(days=30)
     grace_end = subscription_end + timedelta(days=customer.grace_days)
+    days_left = (subscription_end - today).days
+
+    status = None
+    short_message = None
+    detailed_message = None
 
     if today <= subscription_end:
         status = "active"
+        short_message = "Your WiFi subscription is active."
+
+        # Show warning if nearing expiry (2–4 days left)
+        if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
+            detailed_message = (
+                f"Hi {customer.name},<br>"
+                f"Your account is going to be due in {days_left} day{'s' if days_left > 1 else ''}.<br>"
+                "You can make payment via paybill <strong>4002057</strong><br>"
+                f"and account No <strong>{customer.account_no}</strong>.<br>"
+                "If already paid, kindly forward Mpesa SMS to <strong>+254 790 924185</strong>."
+            )
+            customer.pre_expiry_popup_shown = True
+            db.commit()
+
     elif subscription_end < today <= grace_end:
+        status = "grace"
+        short_message = "Your subscription has expired. Please select a grace period below."
+
+        # Redirect if grace popup not yet shown
         if not customer.popup_shown:
             db.close()
             return redirect(url_for("grace_popup", ip_address=ip_address))
-        status = "grace"
+
+        days_remaining = (grace_end - today).days
+        detailed_message = (
+            f"Hi {customer.name}, you're currently in the <strong>grace period</strong>.<br>"
+            f"{days_remaining} day{'s' if days_remaining != 1 else ''} remaining before suspension.<br>"
+            "Please pay as soon as possible to avoid disconnection."
+        )
+
     else:
         status = "suspended"
+        short_message = "Your WiFi is suspended. Please contact admin to reset your subscription."
+        detailed_message = (
+            f"Hi {customer.name}, your account has been <strong>suspended</strong> due to non-payment.<br>"
+            "To restore service, pay via paybill <strong>4002057</strong><br>"
+            f"Account No: <strong>{customer.account_no}</strong><br>"
+            "Then forward Mpesa SMS to <strong>+254 790 924185</strong>."
+        )
+
     db.close()
-    return render_template("customer/wifi_home.html", customer=customer, status=status)
+    return render_template(
+        "customer/wifi_home.html",
+        customer=customer,
+        status=status,
+        short_message=short_message,
+        detailed_message=detailed_message,
+    )
 
-@app.route("/wifi_access")
-def wifi_access_by_ip():
-    client_ip = request.remote_addr
-    db = SessionLocal()
-    try:
-        customer = db.query(Customer).filter_by(ip_address=client_ip).first()
-        if not customer:
-            return f"No customer found for IP {client_ip}", 404
-        today = datetime.utcnow()
-        subscription_end = customer.start_date + timedelta(days=30)
-        grace_end = subscription_end + timedelta(days=customer.grace_days)
-        days_left = (subscription_end - today).days
-        if 0 < days_left <= 4 and not customer.pre_expiry_popup_shown:
-            customer.pre_expiry_popup_shown = True
-            db.commit()
-            return render_template("customer/pre_expiry_popup.html", customer=customer, days_left=days_left)
-        if today <= subscription_end:
-            status = "active"
-        elif subscription_end < today <= grace_end:
-            if not customer.popup_shown:
-                return redirect(url_for("grace_popup", ip_address=customer.ip_address))
-            status = "grace"
-        else:
-            status = "suspended"
-        return render_template("customer/wifi_home.html", customer=customer, status=status)
-    finally:
-        db.close()
 
-@app.route("/mark_paid/<ip_address>", methods=["POST"])
-def mark_paid(ip_address):
+
+#==================== GRACE AND SUSPENDED CUSTOMER =====================
+@app.route("/grace_customers")
+def grace_customers():
     if not session.get("user_id"):
         return redirect(url_for("login"))
     db = SessionLocal()
     try:
-        customer = db.query(Customer).filter_by(ip_address=ip_address).first()
-        if not customer:
-            flash("Customer not found", "danger")
-        else:
-            customer.start_date = datetime.utcnow()
-            customer.grace_days = 0
-            customer.popup_shown = False
-            customer.status = "active"
-            db.commit()
-            flash(f"{customer.name} marked as paid. WiFi reset.", "success")
+        grace_list = db.query(Customer).filter_by(status="grace").all()
     finally:
         db.close()
-    return redirect(url_for("list_customers"))
+    return render_template("admin/grace_customers.html", customers=grace_list)
 
-#=====================export to excel========================
+@app.route("/suspended_customers")
+def suspended_customers():
+    if not session.get("user_id"):
+        return redirect(url_for("login"))       
+    db = SessionLocal()
+    try:
+        suspended_list = db.query(Customer).filter_by(status="suspended").all()
+    finally:
+        db.close()
+    return render_template("admin/suspended_customers.html", customers=suspended_list)
 
-from sqlalchemy.orm import joinedload
+@app.route("/mark_paid/<int:customer_id>", methods=["POST"])
+def mark_paid(customer_id):
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
 
+    with SessionLocal() as db:
+        customer = db.query(Customer).filter_by(id=customer_id).first()
+        if not customer:
+            flash("Customer not found.", "danger")
+        else:
+            customer.start_date = datetime.utcnow()  
+            customer.grace_days = 0
+            customer.status = "active"
+            customer.popup_shown = False
+            customer.pre_expiry_popup_shown = False
+            db.commit()
+            flash(f"{customer.name} has been marked as paid. Subscription reset.", "success")
+
+    return redirect(url_for("grace_customers"))
+
+# ==================== EXPORT TO EXCEL ====================
 @app.route("/customers/export", methods=["GET"])
 def export_customers():
     if not session.get("user_id"):
         return redirect(url_for("login"))
 
     search_term = request.args.get("search", "").strip()
-
     db = SessionLocal()
     try:
         query = db.query(Customer).options(joinedload(Customer.network))
-
-        # Apply search filter if present
         if search_term:
             query = query.filter(
                 (Customer.account_no.like(f"%{search_term}%")) |
                 (Customer.name.like(f"%{search_term}%")) |
                 (Customer.ip_address.like(f"%{search_term}%"))
             )
-
         customers = query.all()
-
-        # Create Excel workbook
         wb = Workbook()
         ws = wb.active
         ws.title = "Customers"
-
-        # Header row
         headers = [
             "Account No", "Name", "Phone", "Email", "Location", "IP Address",
             "Billing Amount", "Cable No", "Loop No", "Power Level",
             "Coordinates", "Status", "Created At"
         ]
         ws.append(headers)
-
-        # Data rows
         for c in customers:
             ws.append([
                 c.account_no,
@@ -503,14 +552,11 @@ def export_customers():
                 c.status,
                 c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else ""
             ])
-
-        # Save workbook to in-memory file
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
     finally:
         db.close()
-
     return send_file(
         output,
         as_attachment=True,
@@ -518,10 +564,9 @@ def export_customers():
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-
-
-
 # ==================== DAILY STATUS CHECK ====================
+from apscheduler.schedulers.background import BackgroundScheduler
+
 def daily_status_check():
     today = datetime.utcnow()
     with SessionLocal() as db:
@@ -530,24 +575,32 @@ def daily_status_check():
             subscription_end = customer.start_date + timedelta(days=30)
             grace_end = subscription_end + timedelta(days=customer.grace_days)
             days_left = (subscription_end - today).days
+
             if today <= subscription_end:
                 customer.status = "active"
             elif subscription_end < today <= grace_end:
                 customer.status = "grace"
-                customer.popup_shown = False
             else:
                 customer.status = "suspended"
-                customer.popup_shown = True
-            if days_left > 4:
+                customer.popup_shown = True  
+
+            # Pre-expiry popup logic
+            if 1 <= days_left <= 4:
                 customer.pre_expiry_popup_shown = False
+            else:
+                customer.pre_expiry_popup_shown = True
+
         db.commit()
 
-def run_scheduler():
-    while True:
-        daily_status_check()
-        time.sleep(86400)
+scheduler = BackgroundScheduler()
+scheduler.add_job(daily_status_check, 'cron', hour=0, minute=0)
+scheduler.start()
 
-threading.Thread(target=run_scheduler, daemon=True).start()
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")  # or return "Terms page"
+
 
 # ==================== RUN APP ====================
 if __name__ == "__main__":

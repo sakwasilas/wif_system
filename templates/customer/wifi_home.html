@@ -1,24 +1,51 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>WiFi Access for {{ customer.name }}</h2>
+<div class="container d-flex justify-content-center align-items-center" style="min-height: 90vh;">
 
-{% if status == "active" %}
-   <p>Your WiFi subscription is active.</p>
+    <div class="card shadow-lg border-0" style="width: 100%; max-width: 600px; background-color: #f8f9fa;">
+        <div class="card-header text-white 
+            {% if status == 'active' %}bg-success
+            {% elif status == 'grace' %}bg-warning
+            {% elif status == 'suspended' %}bg-danger
+            {% else %}bg-secondary
+            {% endif %}">
+            <h4 class="mb-0 text-center">
+                WiFi Access - {{ customer.name }}
+            </h4>
+        </div>
 
-{% elif status == "grace" %}
-   <p>Your subscription has expired. Please select a grace period below.</p>
-   <form method="POST" action="{{ url_for('grace_popup', ip_address=customer.ip_address) }}">
-       <label for="grace_days">Select grace days (1-5):</label>
-       <select name="grace_days" id="grace_days">
-           {% for i in range(1, 6) %}
-               <option value="{{ i }}">{{ i }}</option>
-           {% endfor %}
-       </select>
-       <button type="submit">Submit</button>
-   </form>
+        <div class="card-body text-center">
 
-{% elif status == "suspended" %}
-   <p>Your WiFi is suspended. Please contact admin to reset your subscription.</p>
-{% endif %}
+            {% if short_message %}
+                <p class="fw-bold">{{ short_message }}</p>
+            {% endif %}
+
+            {% if detailed_message %}
+                <p class="fs-5">{{ detailed_message|safe }}</p>
+            {% endif %}
+
+            {% if status == "grace" and not customer.grace_days %}
+                <form method="POST" action="{{ url_for('grace_popup', ip_address=customer.ip_address) }}" class="mt-4">
+                    <div class="mb-3">
+                        <label for="grace_days" class="form-label fw-bold">Select Grace Days (1-5):</label>
+                        <select name="grace_days" id="grace_days" class="form-select" required>
+                            {% for i in range(1, 6) %}
+                                <option value="{{ i }}">{{ i }} Day{% if i > 1 %}s{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-warning w-100">Request Grace Period</button>
+                </form>
+            {% endif %}
+
+        </div>
+
+        <div class="card-footer text-muted text-center">
+            &copy; {{ current_year }} Your Company Name. All rights reserved.
+            <br>
+        </div>
+    </div>
+
+</div>
 {% endblock %}

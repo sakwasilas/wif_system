@@ -4,18 +4,30 @@
 <div class="container mt-4">
     <h2>Grant Grace Period to {{ customer.name }}</h2>
 
+    {% if customer.grace_days > 0 %}
+        <div class="alert alert-info">
+            Current grace period: <strong>{{ customer.grace_days }} day{{ "s" if customer.grace_days > 1 }}</strong>
+        </div>
+    {% endif %}
+
     <form method="POST" action="{{ url_for('grace_popup', ip_address=customer.ip_address) }}" class="card p-4 shadow-sm">
         <div class="mb-3">
             <label for="grace_days" class="form-label">Select Grace Days</label>
             <select name="grace_days" id="grace_days" class="form-select" required>
                 <option value="" disabled selected>-- Choose --</option>
-                {% for day in range(1,6) %}
-                    <option value="{{ day }}">{{ day }} Day{% if day > 1 %}s{% endif %}</option>
+                {% for day in range(1, 6) %}
+                    <option value="{{ day }}">{{ day }} {{ "Day" if day == 1 else "Days" }}</option>
                 {% endfor %}
             </select>
+            <small class="form-text text-muted">
+                You can only request a grace period once. This cannot be undone.
+            </small>
         </div>
 
-        <button type="submit" class="btn btn-warning">Grant Grace Period</button>
+        <button type="submit" class="btn btn-warning"
+            onclick="this.disabled=true; this.innerText='Processing...'; this.form.submit();">
+            Grant Grace Period
+        </button>
     </form>
 </div>
 {% endblock %}

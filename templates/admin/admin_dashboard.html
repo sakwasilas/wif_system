@@ -6,35 +6,55 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <style>
         body {
-            background: #f8f9fa;
+            background: #f4f6f8;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         .navbar-brand {
             font-weight: bold;
             font-size: 1.3rem;
-            letter-spacing: 1px;
         }
-        .card {
+        .sidebar {
+            background: #fff;
             border-radius: 12px;
-            transition: transform 0.2s ease-in-out;
+            padding: 1rem;
+            height: 100%;
         }
-        .card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.1);
-        }
-        h2 {
-            font-weight: 600;
-            color: #343a40;
-        }
-        .dashboard-section {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 1.5rem;
-        }
-        .btn {
-            border-radius: 8px;
-        }
-        .alert {
+        .stat-card {
             border-radius: 10px;
+            padding: 0.8rem;
+            margin-bottom: 0.8rem;
+            text-align: center;
+            color: #fff;
+            cursor: default;
+        }
+        .stat-card h5 { font-size: 0.9rem; margin-bottom: 0.2rem; }
+        .stat-card h2 { font-size: 1.4rem; margin: 0; }
+
+        .stat-card.active { background: #28a745; }
+        .stat-card.grace { background: #ffc107; color: #212529; cursor:pointer; }
+        .stat-card.suspended { background: #dc3545; cursor:pointer; }
+        .stat-card.total { background: #343a40; }
+
+        .main-content .card {
+            border-radius: 12px;
+            margin-bottom: 1rem;
+        }
+        .main-content .card-title {
+            font-size: 1rem;
+        }
+        footer {
+            margin-top: 2rem;
+            text-align: center;
+            padding: 0.8rem;
+            color: #6c757d;
+        }
+
+        hr {
+            border: 0;
+            height: 1px;
+            background: linear-gradient(to right, #ddd, #007bff, #ddd);
+            margin: 1.5rem 0;
+            border-radius: 5px;
         }
     </style>
 </head>
@@ -46,48 +66,87 @@
             <span class="navbar-brand">📶 WiFi Management</span>
             <div class="d-flex align-items-center">
                 <span class="navbar-text text-white me-3">
-                    👤 Logged in as: <strong>{{ username }}</strong>
+                    👤 {{ username }}
                 </span>
                 <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
             </div>
         </div>
     </nav>
 
-    <!-- Main Content -->
-    <div class="container my-5">
-        <h2 class="mb-4">⚡ Admin Dashboard</h2>
+    <!-- Main Container -->
+    <div class="container my-4">
+        <div class="row">
 
-        <div class="alert alert-info shadow-sm">
-            Welcome back, <strong>{{ username }}</strong>! 🎉
-        </div>
+            <!-- Left Sidebar -->
+            <div class="col-md-3">
+                <div class="sidebar shadow-sm">
 
-        <!-- Dashboard Sections -->
-        <div class="dashboard-section">
-            
-            <!-- Customer Management -->
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">👥 Customer Management</h5>
-                    <p class="card-text text-muted">View, add, and manage your WiFi customers.</p>
-                    <a href="{{ url_for('add_customer') }}" class="btn btn-success me-2">➕ Add Customer</a>
-                    <a href="{{ url_for('list_customers') }}" class="btn btn-primary">📋 View Customers</a>
+                    <!-- Quick Actions (Prioritized) -->
+                    <a href="{{ url_for('add_customer') }}" class="btn btn-success btn-sm w-100 mb-2">➕ Add Customer</a>
+                    <a href="{{ url_for('list_customers') }}" class="btn btn-primary btn-sm w-100 mb-3">📋 View Customers</a>
+
+                    <!-- User Management (Super Admin only) -->
+                    {% if session.role == "super_admin" %}
+                    <a href="{{ url_for('manage_users') }}" class="btn btn-warning btn-sm w-100 mb-2">👥 Manage Users</a>
+                    <a href="{{ url_for('pending_users') }}" class="btn btn-danger btn-sm w-100 mb-3">🔑 Pending Admins</a>
+                    {% endif %}
+
+                    <hr>
+
+                    <!-- Stats -->
+                    <div class="stat-card active">
+                        <h5>Active Users</h5>
+                        <h2>{{ active_users }}</h2>
+                    </div>
+                    <div class="stat-card grace" onclick="window.location='{{ url_for('grace_customers') }}';">
+    <h5>In Grace</h5>
+    <h2>{{ grace_users }}</h2>
+</div>
+
+<div class="stat-card suspended" onclick="window.location='{{ url_for('suspended_customers') }}';">
+    <h5>Suspended</h5>
+    <h2>{{ suspended_users }}</h2>
+</div>
+
+                    <div class="stat-card total">
+                        <h5>Total Users</h5>
+                        <h2>{{ total_users }}</h2>
+                    </div>
+
                 </div>
             </div>
 
-            <!-- Manage Users -->
-            {% if session.role == "super_admin" %}
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">⚙️ Manage Users</h5>
-                    <p class="card-text text-muted">Approve, deactivate, or assign roles to users.</p>
-                    <a href="{{ url_for('manage_users') }}" class="btn btn-warning me-2">👥 Manage Users</a>
-                    <a href="{{ url_for('pending_users') }}" class="btn btn-danger">🔑 Pending Admins</a>
+            <!-- Right Main Section -->
+            <div class="col-md-9 main-content">
+                <h2>⚡ Admin Dashboard</h2>
+                <div class="alert alert-info shadow-sm py-2">
+                    Welcome back, <strong>{{ username }}</strong>! 🎉
                 </div>
+
+                <!-- Example content cards -->
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title">Customer Management</h5>
+                        <p class="card-text text-muted small">View, edit, or delete customer accounts.</p>
+                    </div>
+                </div>
+
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title">User Management</h5>
+                        <p class="card-text text-muted small">Approve new admins or deactivate users.</p>
+                    </div>
+                </div>
+
             </div>
-            {% endif %}
 
         </div>
     </div>
+
+    <hr>
+    <footer>
+        <small>&copy; {{ current_year }} My ISP Management System</small>
+    </footer>
 
 </body>
 </html>
