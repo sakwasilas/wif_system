@@ -104,3 +104,7 @@ webcolors==24.11.1
 webencodings==0.5.1
 websocket-client==1.8.0
 Werkzeug==3.1.3
+
+# Added for Render deploy
+gunicorn==23.0.0
+routeros-api==0.18.1
