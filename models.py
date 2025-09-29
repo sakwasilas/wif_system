@@ -34,6 +34,7 @@ class Customer(Base):
     pre_expiry_popup_shown = Column(Boolean, default=False)  # ✅ New column
     account_no = Column(String(50), nullable=False, unique=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    mikrotik_password = Column(String(100))  # ✅ new field
 
     # One-to-one relationship with network info
     network = relationship("CustomerNetwork", back_populates="customer", uselist=False)

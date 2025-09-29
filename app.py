@@ -16,11 +16,17 @@ from flask import (
     flash,
     send_file
 )
+#=====================microtipt=======================
+from mikrotik_helper import add_pppoe_user
+#========================================================
 
 # ==================== THIRD-PARTY ====================
 from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook
 from sqlalchemy.orm import joinedload
+from mikrotik_helper import add_pppoe_user, disable_pppoe_user, enable_pppoe_user, remove_pppoe_user
+
+
 
 # ==================== LOCAL MODULES ====================
 from connections import SessionLocal
@@ -191,7 +197,8 @@ def admin_dashboard():
     finally:
         db.close()
 
-# ==================== CUSTOMER CRUD ====================
+import secrets
+
 @app.route("/customers/add", methods=["GET", "POST"])
 def add_customer():
     if not session.get("user_id"):
@@ -228,6 +235,10 @@ def add_customer():
                 return redirect(url_for("add_customer"))
 
             start_date = datetime.utcnow()
+
+            # ✅ Generate PPPoE password before saving
+            mikrotik_password = secrets.token_hex(4)  # random 8-char
+
             new_customer = Customer(
                 name=name,
                 phone=phone,
@@ -236,6 +247,7 @@ def add_customer():
                 ip_address=ip_address,
                 billing_amount=float(billing_amount),
                 account_no=account_no,
+                mikrotik_password=mikrotik_password,  # ✅ save it
                 start_date=start_date,
                 grace_days=0,
                 status="active",
@@ -244,6 +256,7 @@ def add_customer():
             )
             db.add(new_customer)
             db.commit()
+            db.refresh(new_customer)
 
             network = CustomerNetwork(
                 customer_id=new_customer.id,
@@ -256,7 +269,13 @@ def add_customer():
             db.add(network)
             db.commit()
 
-            flash("Customer added successfully!", "success")
+            # ✅ Create in MikroTik
+            try:
+                add_pppoe_user(username=account_no, password=mikrotik_password)
+                flash(f"Customer added. PPPoE Password: {mikrotik_password}", "success")
+            except Exception as e:
+                flash(f"Customer saved, but MikroTik error: {e}", "warning")
+
             return redirect(url_for("list_customers"))
         finally:
             db.close()
@@ -358,113 +377,135 @@ def delete_customer(customer_id):
     finally:
         db.close()
     return redirect(url_for("list_customers"))
-
-# ==================== GRACE / WIFI / MARK PAID ====================
 @app.route("/grace_popup/<ip_address>", methods=["GET", "POST"])
 def grace_popup(ip_address):
-    db = SessionLocal()
-    customer = db.query(Customer).filter_by(ip_address=ip_address).first()
-    if not customer:
-        db.close()
-        return "Customer not found", 404
+    with SessionLocal() as db:
+        customer = db.query(Customer).filter_by(ip_address=ip_address).first()
+        if not customer:
+            return "Customer not found", 404
 
-    # 🚫 Prevent user from re-using the grace popup
-    if customer.popup_shown:
-        db.close()
-        flash("Grace period has already been selected.", "warning")
-        return redirect(url_for("wifi_access", ip_address=ip_address))
+        if customer.popup_shown:
+            flash("Grace period already selected.", "warning")
+            return redirect(url_for("wifi_access", ip_address=ip_address))
 
-    if request.method == "POST":
-        try:
-            selected_days = int(request.form.get("grace_days", 1))
-            # ✅ Enforce allowed grace days (optional but recommended)
-            if selected_days not in [1, 2, 3,4,5]:
-                flash("Invalid grace period selected.", "danger")
+        if request.method == "POST":
+            try:
+                selected_days = int(request.form.get("grace_days", 1))
+                if selected_days not in [1, 2, 3, 4, 5]:
+                    flash("Invalid grace period selected.", "danger")
+                    return redirect(url_for("grace_popup", ip_address=ip_address))
+
+                customer.grace_days = selected_days
+                customer.popup_shown = True
+                customer.status = "grace"
+                db.commit()
+
+                try:
+                    enable_pppoe_user(customer.account_no)
+                    flash(f"Grace period of {selected_days} day(s) selected. WiFi restored.", "success")
+                except Exception as e:
+                    flash(f"Grace period saved, but MikroTik error: {e}", "warning")
+
+                return redirect(url_for("wifi_access", ip_address=ip_address))
+            except Exception as e:
+                db.rollback()
+                flash(f"Error: {str(e)}", "danger")
                 return redirect(url_for("grace_popup", ip_address=ip_address))
 
-            customer.grace_days = selected_days
-            customer.popup_shown = True
-            db.commit()
-            flash(f"Grace period selected: {selected_days} day(s)", "success")
-            return redirect(url_for("wifi_access", ip_address=ip_address))
-        except Exception as e:
-            db.rollback()
-            flash(f"Error: {str(e)}", "danger")
-        finally:
-            db.close()
-    else:
-        db.close()
         return render_template("customer/grace_popup.html", customer=customer)
-
-
+#====================wifi acess by ip=============================================
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
-    db = SessionLocal()
-    customer = db.query(Customer).filter_by(ip_address=ip_address).first()
-    if not customer:
-        db.close()
-        return "Customer not found", 404
+    with SessionLocal() as db:
+        customer = db.query(Customer).filter_by(ip_address=ip_address).first()
+        if not customer:
+            return "Customer not found", 404
 
-    today = datetime.utcnow()
-    subscription_end = customer.start_date + timedelta(days=30)
-    grace_end = subscription_end + timedelta(days=customer.grace_days)
-    days_left = (subscription_end - today).days
+        today = datetime.utcnow()
+        subscription_end = customer.start_date + timedelta(days=30)
+        grace_end = subscription_end + timedelta(days=customer.grace_days)
+        days_left = (subscription_end - today).days
 
-    status = None
-    short_message = None
-    detailed_message = None
+        status = None
+        short_message = None
+        detailed_message = None
 
-    if today <= subscription_end:
-        status = "active"
-        short_message = "Your WiFi subscription is active."
+        # ==========================
+        # Subscription still active
+        # ==========================
+        if today <= subscription_end:
+            customer.status = "active"
+            status = "active"
+            short_message = "Your WiFi subscription is active."
 
-        # Show warning if nearing expiry (2–4 days left)
-        if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
+            if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
+                detailed_message = (
+                    f"Hi {customer.name}, your subscription expires in {days_left} day(s).<br>"
+                    "Pay via Paybill <strong>4002057</strong><br>"
+                    f"Account No: <strong>{customer.account_no}</strong><br>"
+                    "If already paid, forward Mpesa SMS to <strong>+254 790 924185</strong>."
+                )
+                customer.pre_expiry_popup_shown = True
+                db.commit()
+
+            try:
+                enable_pppoe_user(customer.account_no)
+            except Exception as e:
+                print(f"MikroTik enable error: {e}")
+
+        # ==========================
+        # Grace period (optional)
+        # ==========================
+        elif subscription_end < today <= grace_end:
+            customer.status = "grace"
+            status = "grace"
+            short_message = "Your subscription expired. You are in grace period."
+
+            # Only show grace popup if not already shown and not paid
+            if not customer.popup_shown and not request.args.get("paid"):
+                return redirect(url_for("grace_popup", ip_address=ip_address))
+
+            days_remaining = (grace_end - today).days
             detailed_message = (
-                f"Hi {customer.name},<br>"
-                f"Your account is going to be due in {days_left} day{'s' if days_left > 1 else ''}.<br>"
-                "You can make payment via paybill <strong>4002057</strong><br>"
-                f"and account No <strong>{customer.account_no}</strong>.<br>"
-                "If already paid, kindly forward Mpesa SMS to <strong>+254 790 924185</strong>."
+                f"Hi {customer.name}, you have {days_remaining} day(s) left in your grace period.<br>"
+                "Please pay to avoid suspension."
             )
-            customer.pre_expiry_popup_shown = True
+
+            try:
+                enable_pppoe_user(customer.account_no)
+            except Exception as e:
+                print(f"MikroTik grace enable error: {e}")
+
             db.commit()
 
-    elif subscription_end < today <= grace_end:
-        status = "grace"
-        short_message = "Your subscription has expired. Please select a grace period below."
+        # ==========================
+        # Suspended
+        # ==========================
+        else:
+            customer.status = "suspended"
+            status = "suspended"
+            short_message = "Your WiFi is suspended. Contact admin to reactivate."
+            detailed_message = (
+                f"Hi {customer.name}, your account has been suspended.<br>"
+                "Pay via Paybill <strong>4002057</strong><br>"
+                f"Account No: <strong>{customer.account_no}</strong><br>"
+                "Forward Mpesa SMS to <strong>+254 790 924185</strong> after payment."
+            )
 
-        # Redirect if grace popup not yet shown
-        if not customer.popup_shown:
-            db.close()
-            return redirect(url_for("grace_popup", ip_address=ip_address))
+            try:
+                disable_pppoe_user(customer.account_no)
+            except Exception as e:
+                print(f"MikroTik disable error: {e}")
 
-        days_remaining = (grace_end - today).days
-        detailed_message = (
-            f"Hi {customer.name}, you're currently in the <strong>grace period</strong>.<br>"
-            f"{days_remaining} day{'s' if days_remaining != 1 else ''} remaining before suspension.<br>"
-            "Please pay as soon as possible to avoid disconnection."
+            db.commit()
+
+        return render_template(
+            "customer/wifi_home.html",
+            customer=customer,
+            status=status,
+            short_message=short_message,
+            detailed_message=detailed_message,
         )
-
-    else:
-        status = "suspended"
-        short_message = "Your WiFi is suspended. Please contact admin to reset your subscription."
-        detailed_message = (
-            f"Hi {customer.name}, your account has been <strong>suspended</strong> due to non-payment.<br>"
-            "To restore service, pay via paybill <strong>4002057</strong><br>"
-            f"Account No: <strong>{customer.account_no}</strong><br>"
-            "Then forward Mpesa SMS to <strong>+254 790 924185</strong>."
-        )
-
-    db.close()
-    return render_template(
-        "customer/wifi_home.html",
-        customer=customer,
-        status=status,
-        short_message=short_message,
-        detailed_message=detailed_message,
-    )
-
 
 
 #==================== GRACE AND SUSPENDED CUSTOMER =====================
@@ -499,16 +540,24 @@ def mark_paid(customer_id):
         customer = db.query(Customer).filter_by(id=customer_id).first()
         if not customer:
             flash("Customer not found.", "danger")
-        else:
-            customer.start_date = datetime.utcnow()  
-            customer.grace_days = 0
-            customer.status = "active"
-            customer.popup_shown = False
-            customer.pre_expiry_popup_shown = False
-            db.commit()
-            flash(f"{customer.name} has been marked as paid. Subscription reset.", "success")
+            return redirect(url_for("grace_customers"))
+
+        # Reset subscription immediately
+        customer.start_date = datetime.utcnow()
+        customer.grace_days = 0
+        customer.status = "active"
+        customer.popup_shown = False
+        customer.pre_expiry_popup_shown = False
+        db.commit()
+
+        try:
+            enable_pppoe_user(customer.account_no)
+            flash(f"{customer.name} is marked paid and subscription is active.", "success")
+        except Exception as e:
+            flash(f"Marked paid but MikroTik error: {e}", "warning")
 
     return redirect(url_for("grace_customers"))
+
 
 # ==================== EXPORT TO EXCEL ====================
 @app.route("/customers/export", methods=["GET"])
@@ -563,9 +612,7 @@ def export_customers():
         download_name="customers.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
-# ==================== DAILY STATUS CHECK ====================
-from apscheduler.schedulers.background import BackgroundScheduler
+#===============daily shedulerchecks==========================
 
 def daily_status_check():
     today = datetime.utcnow()
@@ -576,13 +623,30 @@ def daily_status_check():
             grace_end = subscription_end + timedelta(days=customer.grace_days)
             days_left = (subscription_end - today).days
 
+            old_status = customer.status  # keep track of previous state
+
             if today <= subscription_end:
                 customer.status = "active"
+                if old_status != "active":
+                    try:
+                        enable_pppoe_user(customer.account_no)
+                        print(f"✅ Enabled {customer.name} ({customer.account_no})")
+                    except Exception as e:
+                        print(f"❌ Error enabling {customer.account_no}: {e}")
+
             elif subscription_end < today <= grace_end:
                 customer.status = "grace"
+                # keep PPPoE active during grace period
+
             else:
                 customer.status = "suspended"
-                customer.popup_shown = True  
+                customer.popup_shown = True
+                if old_status != "suspended":
+                    try:
+                        disable_pppoe_user(customer.account_no)
+                        print(f"🔒 Suspended {customer.name} ({customer.account_no})")
+                    except Exception as e:
+                        print(f"❌ Error suspending {customer.account_no}: {e}")
 
             # Pre-expiry popup logic
             if 1 <= days_left <= 4:
@@ -591,17 +655,12 @@ def daily_status_check():
                 customer.pre_expiry_popup_shown = True
 
         db.commit()
+def run_scheduler():
+    while True:
+        daily_status_check()
+        time.sleep(24 * 60 * 60)  # 24 hours
 
-scheduler = BackgroundScheduler()
-scheduler.add_job(daily_status_check, 'cron', hour=0, minute=0)
-scheduler.start()
+threading.Thread(target=run_scheduler, daemon=True).start()
 
-
-@app.route("/terms")
-def terms():
-    return render_template("terms.html")  # or return "Terms page"
-
-
-# ==================== RUN APP ====================
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host="0.0.0.0", port=5000)
