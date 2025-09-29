@@ -4,6 +4,7 @@ gunicorn==23.0.0
 # Database
 SQLAlchemy==2.0.43
 mysqlclient==2.2.7
+psycopg2-binary==2.9.9
 
 # MikroTik API
 RouterOS-api==0.21.0
