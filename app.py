@@ -363,15 +363,34 @@ def grace_popup(ip_address):
         customer = db.query(Customer).filter_by(ip_address=ip_address).first()
         if not customer:
             return "Customer not found", 404
-        if customer.popup_shown:
+
+        today = datetime.utcnow().date()
+        start_date = customer.start_date.date() if customer.start_date else today
+        subscription_end = start_date + timedelta(days=30)
+
+        # Default grace_days to 1 if not set
+        if not customer.grace_days or customer.grace_days < 1:
+            customer.grace_days = 1
+
+        grace_end = subscription_end + timedelta(days=customer.grace_days)
+
+        # If grace period is over, suspend immediately
+        if today > grace_end:
+            customer.status = "suspended"
+            customer.popup_shown = True
+            try:
+                block_ip(customer.ip_address)
+            except Exception as e:
+                print(f"IP block error: {e}")
+            db.commit()
             return redirect(url_for("wifi_access", ip_address=ip_address))
+
+        # POST: Customer selects grace days manually
         if request.method == "POST":
             selected_days = request.form.get("grace_days")
             try:
                 selected_days = int(selected_days) if selected_days else 1
-                if selected_days not in [1, 2, 3, 4, 5]:
-                    flash("Select 1–5 days only", "danger")
-                    return redirect(url_for("grace_popup", ip_address=ip_address))
+                selected_days = min(selected_days, 5)  # max 5 days
                 customer.grace_days = selected_days
                 customer.popup_shown = True
                 customer.status = "grace"
@@ -383,6 +402,13 @@ def grace_popup(ip_address):
                 db.rollback()
                 flash(f"Error: {e}", "danger")
                 return redirect(url_for("grace_popup", ip_address=ip_address))
+
+        # GET: Automatic daily grace increment if not yet acknowledged
+        if not customer.popup_shown:
+            # Increment grace_days by 1 per day, max 5
+            customer.grace_days = min((customer.grace_days or 1) + 1, 5)
+            db.commit()
+
         return render_template("customer/grace_popup.html", customer=customer)
 
 @app.route("/wifi_access/<ip_address>")
@@ -392,11 +418,11 @@ def wifi_access(ip_address):
         if not customer:
             return "Customer not found", 404
 
-        # Normalize all to date objects
         today = datetime.utcnow().date()
         start_date = customer.start_date.date() if customer.start_date else today
         subscription_end = start_date + timedelta(days=30)
-        grace_end = subscription_end + timedelta(days=customer.grace_days or 0)
+        grace_days = customer.grace_days or 1
+        grace_end = subscription_end + timedelta(days=grace_days)
         days_left = (subscription_end - today).days
 
         status = short_message = detailed_message = None
@@ -404,73 +430,52 @@ def wifi_access(ip_address):
         # ==================== ACTIVE ====================
         if today <= subscription_end:
             customer.status = "active"
-            status = "active"
             short_message = f"Your WiFi is active until {subscription_end}."
-
             if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
                 detailed_message = (
                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
                     f"({days_left} day(s) left).<br>"
                     "Pay via Paybill <strong>4002057</strong><br>"
                     f"Account No: <strong>{customer.account_no}</strong><br>"
-                    "If already paid, forward Mpesa SMS to <strong>+254 790 924185</strong>."
+                    "Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
                 )
                 customer.pre_expiry_popup_shown = True
-
             try:
                 unblock_ip(customer.ip_address)
-            except Exception as e:
-                print(f"IP unblock error: {e}")
+            except:
+                pass
 
         # ==================== GRACE ====================
         elif subscription_end < today <= grace_end:
             customer.status = "grace"
-            status = "grace"
             short_message = f"Your subscription expired on {subscription_end}. You are in grace until {grace_end}."
-
-            if not customer.popup_shown and not request.args.get("paid"):
+            # show popup daily if not acknowledged
+            if not customer.popup_shown:
                 return redirect(url_for("grace_popup", ip_address=ip_address))
-
-            days_remaining = (grace_end - today).days
-            detailed_message = (
-                f"Hi {customer.name}, your subscription expired on <strong>{subscription_end}</strong>.<br>"
-                f"You have <strong>{days_remaining} day(s)</strong> left in your grace period (ends on {grace_end}).<br>"
-                "Please pay to avoid suspension."
-            )
-            try:
-                unblock_ip(customer.ip_address)
-            except Exception as e:
-                print(f"IP unblock error during grace: {e}")
 
         # ==================== SUSPENDED ====================
         else:
             customer.status = "suspended"
-            status = "suspended"
-            short_message = (
-                f"Your WiFi was suspended. Subscription expired on {subscription_end} "
-                f"and grace ended on {grace_end}."
-            )
+            short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
             detailed_message = (
                 f"Hi {customer.name}, your account is suspended.<br>"
-                f"Subscription expired on <strong>{subscription_end}</strong> "
-                f"and grace ended on <strong>{grace_end}</strong>.<br><br>"
+                f"Subscription expired on <strong>{subscription_end}</strong> and grace ended on <strong>{grace_end}</strong>.<br>"
                 "Pay via Paybill <strong>4002057</strong><br>"
                 f"Account No: <strong>{customer.account_no}</strong><br>"
                 "Forward Mpesa SMS to <strong>+254 790 924185</strong> after payment."
             )
             try:
                 block_ip(customer.ip_address)
-            except Exception as e:
-                print(f"IP block error: {e}")
+            except:
+                pass
 
         db.commit()
-
         return render_template(
             "customer/wifi_home.html",
             customer=customer,
             status=status,
             short_message=short_message,
-            detailed_message=detailed_message,
+            detailed_message=detailed_message
         )
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
@@ -579,8 +584,8 @@ def export_customers():
     )
 
 # ==================== DAILY STATUS CHECK ====================
-def daily_status_check(db=None):
-    today = datetime.utcnow()
+ddef daily_status_check(db=None):
+    today = datetime.utcnow().date()
     close_session = False
     if db is None:
         db = SessionLocal()
@@ -588,11 +593,15 @@ def daily_status_check(db=None):
     try:
         customers = db.query(Customer).all()
         for customer in customers:
-            subscription_end = customer.start_date + timedelta(days=31)
-            grace_end = subscription_end + timedelta(days=customer.grace_days)
+            # normalize dates
+            start_date = customer.start_date.date() if customer.start_date else today
+            subscription_end = start_date + timedelta(days=30)
+            grace_days = customer.grace_days or 1  # default 1 if not set
+            grace_end = subscription_end + timedelta(days=grace_days)
             days_left = (subscription_end - today).days
             old_status = customer.status
 
+            # ==================== ACTIVE ====================
             if today <= subscription_end:
                 customer.status = "active"
                 if old_status != "active":
@@ -601,8 +610,23 @@ def daily_status_check(db=None):
                         print(f"✅ Unblocked {customer.name} ({customer.ip_address})")
                     except Exception as e:
                         print(f"❌ Error unblocking {customer.ip_address}: {e}")
+                # pre-expiry popups
+                if 1 <= days_left <= 4:
+                    customer.pre_expiry_popup_shown = False  # show popup daily
+
+            # ==================== GRACE ====================
             elif subscription_end < today <= grace_end:
                 customer.status = "grace"
+                if not customer.popup_shown:
+                    # increment grace days automatically up to 5 max
+                    customer.grace_days = min((customer.grace_days or 1) + 1, 5)
+                    customer.popup_shown = False  # keep showing popup daily
+                try:
+                    unblock_ip(customer.ip_address)
+                except Exception as e:
+                    print(f"❌ Error unblocking {customer.ip_address} during grace: {e}")
+
+            # ==================== SUSPENDED ====================
             else:
                 customer.status = "suspended"
                 customer.popup_shown = True
@@ -612,7 +636,7 @@ def daily_status_check(db=None):
                         print(f"🔒 Blocked {customer.name} ({customer.ip_address})")
                     except Exception as e:
                         print(f"❌ Error blocking {customer.ip_address}: {e}")
-            customer.pre_expiry_popup_shown = not (1 <= days_left <= 4)
+
         db.commit()
     finally:
         if close_session:
