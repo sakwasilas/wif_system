@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+  <h2 class="mb-4">Add Branch</h2>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form method="POST">
+    <div class="mb-3">
+      <label for="name" class="form-label">Branch Name</label>
+      <input type="text" class="form-control" id="name" name="name" placeholder="e.g. Nairobi – Amboseli" required>
+    </div>
+    
+    <button type="submit" class="btn btn-primary">Add Branch</button>
+  </form>
+</div>
+{% endblock %}

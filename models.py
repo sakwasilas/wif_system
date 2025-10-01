@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from connections import Base
-from datetime import datetime, UTC
+
 
 # ==================== USER MODEL ====================
 class User(Base):
@@ -16,6 +16,40 @@ class User(Base):
     role = Column(String(50), default="user")
 
 
+# ==================== BRANCH MODEL ====================
+class Branch(Base):
+    __tablename__ = "branches"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), unique=True, nullable=False)
+    
+    # One branch -> many routers
+    routers = relationship(
+        "Router",
+        back_populates="branch",
+        cascade="all, delete-orphan"  # delete routers if branch is deleted
+    )
+
+
+# ==================== ROUTER MODEL ====================
+class Router(Base):
+    __tablename__ = "routers"
+
+    id = Column(Integer, primary_key=True)
+    ip_address = Column(String(50), unique=True, nullable=False)
+    description = Column(String(255))
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False)
+
+    branch = relationship("Branch", back_populates="routers")
+
+    # One router -> many customers
+    customers = relationship(
+        "Customer",
+        back_populates="router",
+        cascade="all, delete-orphan"  # optional: delete customers if router is deleted
+    )
+
+
 # ==================== CUSTOMER MODEL ====================
 class Customer(Base):
     __tablename__ = "customers"
@@ -24,20 +58,33 @@ class Customer(Base):
     name = Column(String(255), nullable=False)
     phone = Column(String(50), nullable=False)
     email = Column(String(255))
-    location = Column(String(255))
     ip_address = Column(String(50), nullable=False, unique=True)
+    location = Column(String(255))
+   
     billing_amount = Column(Float, nullable=False)
-    start_date = Column(DateTime, default=lambda: datetime.now(UTC))
+
+    start_date = Column(DateTime, nullable=True)
+    contract_date = Column(DateTime, nullable=True)
+
     grace_days = Column(Integer, default=0)
     status = Column(String(50), default="active")
     popup_shown = Column(Boolean, default=False)
-    pre_expiry_popup_shown = Column(Boolean, default=False)  # ✅ New column
-    account_no = Column(String(50), nullable=False, unique=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
-    mikrotik_password = Column(String(100))  # ✅ new field
+    pre_expiry_popup_shown = Column(Boolean, default=False)
 
-    # One-to-one relationship with network info
-    network = relationship("CustomerNetwork", back_populates="customer", uselist=False)
+    account_no = Column(String(50), nullable=False, unique=True)
+    mikrotik_password = Column(String(100))
+
+    # Foreign key -> Router
+    router_id = Column(Integer, ForeignKey("routers.id"))
+
+    # Relationships
+    router = relationship("Router", back_populates="customers")
+    network = relationship(
+        "CustomerNetwork",
+        back_populates="customer",
+        uselist=False,
+        cascade="all, delete-orphan"  # delete network automatically if customer is deleted
+    )
 
 
 # ==================== CUSTOMER NETWORK MODEL ====================
@@ -46,11 +93,11 @@ class CustomerNetwork(Base):
 
     id = Column(Integer, primary_key=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, unique=True)
+
     cable_no = Column(String(50))
-    router_no = Column(String(50))
+    final_coordinates = Column(String(50))
     loop_no = Column(String(50))
     power_level = Column(String(50))
-    # signal_strength = Column(String(50))
     coordinates = Column(String(255))
 
     # Back reference to customer
