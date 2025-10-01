@@ -587,7 +587,7 @@ def export_customers():
     )
 
 # ==================== DAILY STATUS CHECK ====================
-ddef daily_status_check(db=None):
+def daily_status_check(db=None):
     today = datetime.utcnow().date()
     close_session = False
     if db is None:
