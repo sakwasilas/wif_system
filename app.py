@@ -506,26 +506,29 @@ def suspended_customers():
 def mark_paid(customer_id):
     if not session.get("user_id"):
         return redirect(url_for("login"))
+
     with SessionLocal() as db:
         customer = db.query(Customer).filter_by(id=customer_id).first()
         if not customer:
             flash("Customer not found.", "danger")
-            return redirect(url_for("grace_customers"))
+            return redirect(url_for("list_customers"))
 
         # Reset subscription
-        customer.start_date = datetime.utcnow()
-        customer.grace_days = 0
-        customer.status = "active"
-        customer.popup_shown = False
-        customer.pre_expiry_popup_shown = False
+        customer.start_date = datetime.utcnow()         # Reset start date to now
+        customer.grace_days = 0                          # Clear grace period
+        customer.status = "active"                       # Set status to active
+        customer.popup_shown = False                     # Reset grace popup flag
+        customer.pre_expiry_popup_shown = False          # Reset pre-expiry popup flag
         db.commit()
 
         try:
-            unblock_ip(customer.ip_address)
+            unblock_ip(customer.ip_address)             # Ensure IP is unblocked
             flash(f"{customer.name} is marked paid and WiFi is active.", "success")
         except Exception as e:
             flash(f"Marked paid but MikroTik error: {e}", "warning")
-    return redirect(url_for("grace_customers"))
+
+    # Redirect to list of all customers instead of grace page
+    return redirect(url_for("list_customers"))
 
 # ==================== EXPORT TO EXCEL ====================
 @app.route("/customers/export", methods=["GET"])
