@@ -11,7 +11,7 @@
             min-height: 100vh;
         }
         .form-container {
-            max-width: 700px;
+            max-width: 900px;
             margin: 50px auto;
             background: #ffffff;
             padding: 2.5rem;
@@ -78,97 +78,102 @@
         {% endwith %}
 
         <form method="POST">
-            <div class="mb-3">
-                <label for="account_no" class="form-label">Account No *</label>
-                <input type="text" name="account_no" id="account_no" class="form-control" placeholder="Enter account number" required>
-            </div>
+            <div class="row">
+                <!-- Left Column -->
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label for="account_no" class="form-label">Account No *</label>
+                        <input type="text" name="account_no" id="account_no" class="form-control" placeholder="Enter account number" required>
+                    </div>
 
-            <div class="mb-3">
-                <label for="name" class="form-label">Customer Name *</label>
-                <input type="text" name="name" id="name" class="form-control" placeholder="Enter full name" required>
-            </div>
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Customer Name *</label>
+                        <input type="text" name="name" id="name" class="form-control" placeholder="Enter full name" required>
+                    </div>
 
-            <div class="mb-3">
-                <label for="phone" class="form-label">Phone *</label>
-                <input type="text" name="phone" id="phone" class="form-control" placeholder="e.g. +254700000000" required>
-            </div>
+                    <div class="mb-3">
+                        <label for="phone" class="form-label">Phone *</label>
+                        <input type="text" name="phone" id="phone" class="form-control" placeholder="e.g. +254700000000" required>
+                    </div>
 
-            <div class="mb-3">
-                <label for="email" class="form-label">Email</label>
-                <input type="email" name="email" id="email" class="form-control" placeholder="example@email.com">
-            </div>
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email</label>
+                        <input type="email" name="email" id="email" class="form-control" placeholder="example@email.com">
+                    </div>
 
-            <div class="mb-3">
-                <label for="location" class="form-label">Location</label>
-                <input type="text" name="location" id="location" class="form-control" placeholder="e.g. Nairobi, Kenya">
-            </div>
-            <div class="mb-3">
-            <label for="ip_address" class="form-label">Customer IP *</label>
-            <input type="text" name="ip_address" id="ip_address" class="form-control" placeholder="e.g. 192.168.88.100" required>
-            </div>
+                    <div class="mb-3">
+                        <label for="billing_amount" class="form-label">Billing Amount *</label>
+                        <input type="number" step="0.01" name="billing_amount" id="billing_amount" class="form-control" placeholder="Enter billing amount" required>
+                    </div>
 
+                    <div class="mb-3">
+                        <label for="branch_id" class="form-label">Branch *</label>
+                        <select name="branch_id" id="branch_id" class="form-control" required>
+                            <option value="">-- Select Branch --</option>
+                            {% for branch in branches %}
+                                <option value="{{ branch.id }}">{{ branch.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
 
-            <div class="mb-3">
-                <label for="billing_amount" class="form-label">Billing Amount *</label>
-                <input type="number" step="0.01" name="billing_amount" id="billing_amount" class="form-control" placeholder="Enter billing amount" required>
-            </div>
+                    <div class="mb-3">
+                        <label for="router_id" class="form-label">Router *</label>
+                        <select name="router_id" id="router_id" class="form-control" required>
+                            <option value="">-- Select Router (IP) --</option>
+                            {% for router in routers %}
+                                <option value="{{ router.id }}">{{ router.ip_address }} ({{ router.name }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
 
-            <!-- Branch dropdown -->
-            <div class="mb-3">
-                <label for="branch_id" class="form-label">Branch *</label>
-                <select name="branch_id" id="branch_id" class="form-control" required>
-                    <option value="">-- Select Branch --</option>
-                    {% for branch in branches %}
-                        <option value="{{ branch.id }}">{{ branch.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
+                    <div class="mb-3">
+                        <label for="location" class="form-label">Location</label>
+                        <input type="text" name="location" id="location" class="form-control" placeholder="e.g. Nairobi, Kenya">
+                    </div>
+                </div>
 
-            <!-- Router dropdown -->
-            <div class="mb-3">
-                <label for="router_id" class="form-label">Router *</label>
-                <select name="router_id" id="router_id" class="form-control" required>
-                    <option value="">-- Select Router (IP) --</option>
-                    {% for router in routers %}
-                        <option value="{{ router.id }}">{{ router.ip_address }} ({{ router.name }})</option>
-                    {% endfor %}
-                </select>
-            </div>
+                <!-- Right Column -->
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label for="ip_address" class="form-label">Customer IP *</label>
+                        <input type="text" name="ip_address" id="ip_address" class="form-control" placeholder="e.g. 192.168.88.100" required>
+                    </div>
 
-            <div class="mb-3">
-                <label for="cable_no" class="form-label">Cable No</label>
-                <input type="text" name="cable_no" id="cable_no" class="form-control" placeholder="Cable number">
-            </div>
+                    <div class="mb-3">
+                        <label for="cable_no" class="form-label">Cable No</label>
+                        <input type="text" name="cable_no" id="cable_no" class="form-control" placeholder="Cable number">
+                    </div>
 
-            <div class="mb-3">
-                <label for="final_coordinates" class="form-label">Final Coordinates</label>
-                <input type="text" name="final_coordinates" id="final_coordinates" class="form-control" placeholder="e.g. GPS or pole ref">
-            </div>
+                    <div class="mb-3">
+                        <label for="final_coordinates" class="form-label">Final Coordinates</label>
+                        <input type="text" name="final_coordinates" id="final_coordinates" class="form-control" placeholder="e.g. GPS or pole ref">
+                    </div>
 
-            <div class="mb-3">
-                <label for="loop_no" class="form-label">Loop No</label>
-                <input type="text" name="loop_no" id="loop_no" class="form-control" placeholder="Loop number">
-            </div>
+                    <div class="mb-3">
+                        <label for="loop_no" class="form-label">Loop No</label>
+                        <input type="text" name="loop_no" id="loop_no" class="form-control" placeholder="Loop number">
+                    </div>
 
-            <div class="mb-3">
-                <label for="power_level" class="form-label">Power Level</label>
-                <input type="text" name="power_level" id="power_level" class="form-control" placeholder="e.g. -3 dB">
-            </div>
+                    <div class="mb-3">
+                        <label for="power_level" class="form-label">Power Level</label>
+                        <input type="text" name="power_level" id="power_level" class="form-control" placeholder="e.g. -3 dB">
+                    </div>
 
-            <div class="mb-3">
-                <label for="coordinates" class="form-label">Coordinates</label>
-                <input type="text" name="coordinates" id="coordinates" class="form-control" placeholder="e.g. -1.2921, 36.8219">
-            </div>
+                    <div class="mb-3">
+                        <label for="coordinates" class="form-label">Coordinates</label>
+                        <input type="text" name="coordinates" id="coordinates" class="form-control" placeholder="e.g. -1.2921, 36.8219">
+                    </div>
 
-            <!-- Dates -->
-            <div class="mb-3">
-                <label for="start_date" class="form-label">Start Date *</label>
-                <input type="date" id="start_date" name="start_date" class="form-control" required>
-            </div>
+                    <div class="mb-3">
+                        <label for="start_date" class="form-label">Start Date *</label>
+                        <input type="date" id="start_date" name="start_date" class="form-control" required>
+                    </div>
 
-            <div class="mb-3">
-                <label for="contract_date" class="form-label">Contract Date</label>
-                <input type="date" id="contract_date" name="contract_date" class="form-control">
+                    <div class="mb-3">
+                        <label for="contract_date" class="form-label">Contract Date</label>
+                        <input type="date" id="contract_date" name="contract_date" class="form-control">
+                    </div>
+                </div>
             </div>
 
             <div class="d-flex justify-content-between mt-4">
