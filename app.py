@@ -580,7 +580,7 @@ def export_customers():
 
 # ==================== DAILY STATUS CHECK ====================
 def daily_status_check(db=None):
-    today = datetime.utcnow().date()
+    today = datetime.utcnow()
     close_session = False
     if db is None:
         db = SessionLocal()
@@ -588,13 +588,11 @@ def daily_status_check(db=None):
     try:
         customers = db.query(Customer).all()
         for customer in customers:
-            start_date = customer.start_date.date() if customer.start_date else today
-            subscription_end = start_date + timedelta(days=31)
-            grace_end = subscription_end + timedelta(days=customer.grace_days or 0)
+            subscription_end = customer.start_date + timedelta(days=31)
+            grace_end = subscription_end + timedelta(days=customer.grace_days)
             days_left = (subscription_end - today).days
             old_status = customer.status
 
-            # ==================== ACTIVE ====================
             if today <= subscription_end:
                 customer.status = "active"
                 if old_status != "active":
@@ -603,12 +601,8 @@ def daily_status_check(db=None):
                         print(f"✅ Unblocked {customer.name} ({customer.ip_address})")
                     except Exception as e:
                         print(f"❌ Error unblocking {customer.ip_address}: {e}")
-
-            # ==================== GRACE ====================
             elif subscription_end < today <= grace_end:
                 customer.status = "grace"
-
-            # ==================== SUSPENDED ====================
             else:
                 customer.status = "suspended"
                 customer.popup_shown = True
@@ -618,15 +612,11 @@ def daily_status_check(db=None):
                         print(f"🔒 Blocked {customer.name} ({customer.ip_address})")
                     except Exception as e:
                         print(f"❌ Error blocking {customer.ip_address}: {e}")
-
-            # Pre-expiry popup logic
             customer.pre_expiry_popup_shown = not (1 <= days_left <= 4)
-
         db.commit()
     finally:
         if close_session:
             db.close()
-
 
 def run_scheduler():
     while True:
