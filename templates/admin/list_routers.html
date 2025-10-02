@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container mt-4">
+    <h2>Routers List</h2>
+    <a href="{{ url_for('add_router') }}" class="btn btn-success mb-3">Add Router</a>
+
+    <table class="table table-bordered table-striped">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>IP Address</th>
+                <th>Description</th>
+                <th>Branch</th>
+                <th>Username</th>
+                <th>Port</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for router in routers %}
+            <tr>
+                <td>{{ router.id }}</td>
+                <td>{{ router.ip_address }}</td>
+                <td>{{ router.description }}</td>
+                <td>{{ router.branch.name if router.branch else "" }}</td>
+                <td>{{ router.username }}</td>
+                <td>{{ router.port }}</td>
+                <td>
+                    <a href="{{ url_for('edit_router', router_id=router.id) }}" class="btn btn-sm btn-primary">Edit</a>
+                    <form action="{{ url_for('delete_router', router_id=router.id) }}" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this router?');">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

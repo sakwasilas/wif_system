@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 
 # ==================== MIKROTIK HELPER ====================
-from mikrotik_helper import block_ip, unblock_ip, generate_password
+from mikrotik_helper import block_ip, unblock_ip
 
 # ==================== THIRD-PARTY ====================
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -170,22 +170,137 @@ def add_branch():
         return redirect(url_for("add_branch"))
     return render_template("admin/add_branch.html")
 
+#==================list/edit/delete branch===================
+@app.route("/list_branches")
+def list_branches():
+    db = SessionLocal()
+    try:
+        branches = db.query(Branch).all()
+    finally:
+        db.close()
+    return render_template("admin/list_branches.html", branches=branches)
+#---------------------------------------------------------------------------
+@app.route("/edit_branch/<int:branch_id>", methods=["GET", "POST"])
+def edit_branch(branch_id):
+    db = SessionLocal()
+    try:
+        branch = db.query(Branch).filter_by(id=branch_id).first()
+        if not branch:
+            flash("Branch not found", "danger")
+            return redirect(url_for("list_branches"))
+
+        if request.method == "POST":
+            branch.name = request.form.get("name").strip()
+            db.commit()
+            flash("Branch updated successfully", "success")
+            return redirect(url_for("list_branches"))
+    finally:
+        db.close()
+    return render_template("admin/edit_branch.html", branch=branch)
+#-------------------------------------------------------------------------------------
+@app.route("/delete_branch/<int:branch_id>", methods=["POST"])
+def delete_branch(branch_id):
+    db = SessionLocal()
+    try:
+        branch = db.query(Branch).filter_by(id=branch_id).first()
+        if branch:
+            db.delete(branch)
+            db.commit()
+            flash("Branch deleted successfully", "success")
+        else:
+            flash("Branch not found", "danger")
+    finally:
+        db.close()
+    return redirect(url_for("list_branches"))
+
+
+
 @app.route("/add_router", methods=["GET", "POST"])
 def add_router():
     db = SessionLocal()
     branches = db.query(Branch).all()
     if request.method == "POST":
-        ip_address = request.form.get("ip_address")
-        description = request.form.get("description")
+        ip_address = request.form.get("ip_address").strip()
+        description = request.form.get("description").strip()
         branch_id = request.form.get("branch_id")
+        username = request.form.get("username").strip() or "admin"  # default admin
+        password = request.form.get("password").strip()
+        port = request.form.get("port") or 8728
+
+        # Check for duplicate IP
         if db.query(Router).filter_by(ip_address=ip_address).first():
             flash("Router IP already exists!", "danger")
             return redirect(url_for("add_router"))
-        db.add(Router(ip_address=ip_address, description=description, branch_id=branch_id))
+
+        # Save router with credentials
+        router = Router(
+            ip_address=ip_address,
+            description=description,
+            branch_id=branch_id,
+            username=username,
+            password=password,
+            port=int(port)
+        )
+        db.add(router)
         db.commit()
         flash("Router added successfully!", "success")
         return redirect(url_for("add_router"))
+
     return render_template("admin/add_router.html", branches=branches)
+#==================list router===============================
+from sqlalchemy.orm import joinedload
+
+@app.route("/routers")
+def list_routers():
+    db = SessionLocal()
+    try:
+        # Eagerly load the branch relationship
+        routers = db.query(Router).options(joinedload(Router.branch)).all()
+    finally:
+        db.close()
+    return render_template("admin/list_routers.html", routers=routers)
+# ------------------ EDIT ROUTER ------------------
+@app.route("/edit_router/<int:router_id>", methods=["GET", "POST"])
+def edit_router(router_id):
+    db = SessionLocal()
+    try:
+        router = db.query(Router).filter_by(id=router_id).first()
+        branches = db.query(Branch).all()
+        if not router:
+            flash("Router not found", "danger")
+            return redirect(url_for("list_routers"))
+
+        if request.method == "POST":
+            router.ip_address = request.form.get("ip_address")
+            router.description = request.form.get("description")
+            router.branch_id = request.form.get("branch_id")
+            router.username = request.form.get("username")
+            router.password = request.form.get("password")
+            router.port = int(request.form.get("port") or 8728)
+            db.commit()
+            flash("Router updated successfully", "success")
+            return redirect(url_for("list_routers"))
+    finally:
+        db.close()
+    return render_template("admin/edit_router.html", router=router, branches=branches)
+
+# ------------------ DELETE ROUTER ------------------
+@app.route("/delete_router/<int:router_id>", methods=["POST"])
+def delete_router(router_id):
+    db = SessionLocal()
+    try:
+        router = db.query(Router).filter_by(id=router_id).first()
+        if router:
+            db.delete(router)
+            db.commit()
+            flash("Router deleted successfully", "success")
+        else:
+            flash("Router not found", "danger")
+    finally:
+        db.close()
+    return redirect(url_for("list_routers"))
+
+
 
 # ==================== ADMIN DASHBOARD ====================
 @app.route("/admin_dashboard")
@@ -233,7 +348,7 @@ def add_customer():
                 router_id=request.form.get("router_id"),
                 start_date=request.form.get("start_date") or datetime.utcnow(),
                 contract_date=request.form.get("contract_date") or None,
-                mikrotik_password=generate_password()
+                
             )
             db.add(customer)
             db.commit()
@@ -357,33 +472,29 @@ def delete_customer(customer_id):
     return redirect(url_for("list_customers"))
 
 # ==================== GRACE / WIFI ACCESS ====================
+# ==================== GRACE POPUP ====================
 @app.route("/grace_popup/<ip_address>", methods=["GET", "POST"])
 def grace_popup(ip_address):
-    with SessionLocal() as db:
-        customer = db.query(Customer).filter_by(ip_address=ip_address).first()
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    db = SessionLocal()
+    try:
+        customer = db.query(Customer).options(
+            joinedload(Customer.router).joinedload(Router.branch),
+            joinedload(Customer.network)
+        ).filter_by(ip_address=ip_address).first()
+
         if not customer:
             return "Customer not found", 404
 
+        router = customer.router
         today = datetime.utcnow().date()
         start_date = customer.start_date.date() if customer.start_date else today
         subscription_end = start_date + timedelta(days=30)
-
-        # Default grace_days to 1 if not set
         if not customer.grace_days or customer.grace_days < 1:
             customer.grace_days = 1
-
         grace_end = subscription_end + timedelta(days=customer.grace_days)
-
-        # If grace period is over, suspend immediately
-        if today > grace_end:
-            customer.status = "suspended"
-            customer.popup_shown = True
-            try:
-                block_ip(customer.ip_address)
-            except Exception as e:
-                print(f"IP block error: {e}")
-            db.commit()
-            return redirect(url_for("wifi_access", ip_address=ip_address))
 
         # POST: Customer selects grace days manually
         if request.method == "POST":
@@ -395,7 +506,13 @@ def grace_popup(ip_address):
                 customer.popup_shown = True
                 customer.status = "grace"
                 db.commit()
-                unblock_ip(customer.ip_address)
+
+                if router:
+                    try:
+                        unblock_ip(customer.ip_address, router)
+                    except Exception as e:
+                        print(f"IP unblock error on {router.ip_address}: {e}")
+
                 flash(f"Grace period of {selected_days} day(s) activated.", "success")
                 return redirect(url_for("wifi_access", ip_address=ip_address))
             except Exception as e:
@@ -405,19 +522,33 @@ def grace_popup(ip_address):
 
         # GET: Automatic daily grace increment if not yet acknowledged
         if not customer.popup_shown:
-            # Increment grace_days by 1 per day, max 5
             customer.grace_days = min((customer.grace_days or 1) + 1, 5)
             db.commit()
 
         return render_template("customer/grace_popup.html", customer=customer)
+    finally:
+        db.close()
 
+
+#======================WIFI ACCESS====================================
+from sqlalchemy.orm import joinedload
+# ==================== WIFI ACCESS ====================
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
-    with SessionLocal() as db:
-        customer = db.query(Customer).filter_by(ip_address=ip_address).first()
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    db = SessionLocal()
+    try:
+        customer = db.query(Customer).options(
+            joinedload(Customer.router).joinedload(Router.branch),
+            joinedload(Customer.network)
+        ).filter_by(ip_address=ip_address).first()
+
         if not customer:
             return "Customer not found", 404
 
+        router = customer.router
         today = datetime.utcnow().date()
         start_date = customer.start_date.date() if customer.start_date else today
         subscription_end = start_date + timedelta(days=30)
@@ -440,18 +571,25 @@ def wifi_access(ip_address):
                     "Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
                 )
                 customer.pre_expiry_popup_shown = True
-            try:
-                unblock_ip(customer.ip_address)
-            except:
-                pass
+
+            if router:
+                try:
+                    unblock_ip(customer.ip_address, router)
+                except Exception as e:
+                    print(f"Error unblocking {customer.ip_address} on router {router.ip_address}: {e}")
 
         # ==================== GRACE ====================
         elif subscription_end < today <= grace_end:
             customer.status = "grace"
             short_message = f"Your subscription expired on {subscription_end}. You are in grace until {grace_end}."
-            # show popup daily if not acknowledged
             if not customer.popup_shown:
                 return redirect(url_for("grace_popup", ip_address=ip_address))
+
+            if router:
+                try:
+                    unblock_ip(customer.ip_address, router)
+                except Exception as e:
+                    print(f"Error unblocking {customer.ip_address} on router {router.ip_address}: {e}")
 
         # ==================== SUSPENDED ====================
         else:
@@ -464,12 +602,15 @@ def wifi_access(ip_address):
                 f"Account No: <strong>{customer.account_no}</strong><br>"
                 "Forward Mpesa SMS to <strong>+254 790 924185</strong> after payment."
             )
-            try:
-                block_ip(customer.ip_address)
-            except:
-                pass
+            if router:
+                try:
+                    block_ip(customer.ip_address, router)
+                except Exception as e:
+                    print(f"Error blocking {customer.ip_address} on router {router.ip_address}: {e}")
 
         db.commit()
+
+        # Render template while session is still open
         return render_template(
             "customer/wifi_home.html",
             customer=customer,
@@ -477,6 +618,8 @@ def wifi_access(ip_address):
             short_message=short_message,
             detailed_message=detailed_message
         )
+    finally:
+        db.close()
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
 @app.route("/grace_customers")
@@ -508,10 +651,12 @@ def mark_paid(customer_id):
         return redirect(url_for("login"))
 
     with SessionLocal() as db:
-        customer = db.query(Customer).filter_by(id=customer_id).first()
+        customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(id=customer_id).first()
         if not customer:
             flash("Customer not found.", "danger")
             return redirect(url_for("list_customers"))
+
+        router = customer.router
 
         # Reset subscription
         customer.start_date = datetime.utcnow()         # Reset start date to now
@@ -519,16 +664,22 @@ def mark_paid(customer_id):
         customer.status = "active"                       # Set status to active
         customer.popup_shown = False                     # Reset grace popup flag
         customer.pre_expiry_popup_shown = False          # Reset pre-expiry popup flag
+
         db.commit()
 
-        try:
-            unblock_ip(customer.ip_address)             # Ensure IP is unblocked
-            flash(f"{customer.name} is marked paid and WiFi is active.", "success")
-        except Exception as e:
-            flash(f"Marked paid but MikroTik error: {e}", "warning")
+        # Unblock IP on the assigned router
+        if router:
+            try:
+                unblock_ip(customer.ip_address, router)
+                flash(f"{customer.name} is marked paid and WiFi is active.", "success")
+            except Exception as e:
+                flash(f"Marked paid but MikroTik error: {e}", "warning")
+        else:
+            flash(f"{customer.name} is marked paid. No router assigned.", "info")
 
-    # Redirect to list of all customers instead of grace page
+    # Redirect to list of all customers
     return redirect(url_for("list_customers"))
+
 
 # ==================== EXPORT TO EXCEL ====================
 @app.route("/customers/export", methods=["GET"])
@@ -588,32 +739,34 @@ def export_customers():
 
 # ==================== DAILY STATUS CHECK ====================
 def daily_status_check(db=None):
+    """Check all customers and update their status across multiple routers."""
     today = datetime.utcnow().date()
     close_session = False
     if db is None:
         db = SessionLocal()
         close_session = True
+
     try:
-        customers = db.query(Customer).all()
+        customers = db.query(Customer).options(joinedload(Customer.router)).all()
         for customer in customers:
-            # normalize dates
+            router = customer.router
             start_date = customer.start_date.date() if customer.start_date else today
             subscription_end = start_date + timedelta(days=30)
-            grace_days = customer.grace_days or 1  # default 1 if not set
+            grace_days = customer.grace_days or 1
             grace_end = subscription_end + timedelta(days=grace_days)
-            days_left = (subscription_end - today).days
             old_status = customer.status
 
             # ==================== ACTIVE ====================
             if today <= subscription_end:
                 customer.status = "active"
-                if old_status != "active":
+                if old_status != "active" and router:
                     try:
-                        unblock_ip(customer.ip_address)
-                        print(f"✅ Unblocked {customer.name} ({customer.ip_address})")
+                        unblock_ip(customer.ip_address, router)
+                        print(f"✅ Unblocked {customer.name} ({customer.ip_address}) on router {router.ip_address}")
                     except Exception as e:
-                        print(f"❌ Error unblocking {customer.ip_address}: {e}")
+                        print(f"❌ Error unblocking {customer.ip_address} on {router.ip_address}: {e}")
                 # pre-expiry popups
+                days_left = (subscription_end - today).days
                 if 1 <= days_left <= 4:
                     customer.pre_expiry_popup_shown = False  # show popup daily
 
@@ -621,29 +774,33 @@ def daily_status_check(db=None):
             elif subscription_end < today <= grace_end:
                 customer.status = "grace"
                 if not customer.popup_shown:
-                    # increment grace days automatically up to 5 max
                     customer.grace_days = min((customer.grace_days or 1) + 1, 5)
-                    customer.popup_shown = False  # keep showing popup daily
-                try:
-                    unblock_ip(customer.ip_address)
-                except Exception as e:
-                    print(f"❌ Error unblocking {customer.ip_address} during grace: {e}")
+                    customer.popup_shown = False
+                if router:
+                    try:
+                        unblock_ip(customer.ip_address, router)
+                        print(f"✅ Unblocked {customer.name} ({customer.ip_address}) on router {router.ip_address} during grace")
+                    except Exception as e:
+                        print(f"❌ Error unblocking {customer.ip_address} on {router.ip_address} during grace: {e}")
 
             # ==================== SUSPENDED ====================
             else:
                 customer.status = "suspended"
                 customer.popup_shown = True
-                if old_status != "suspended":
+                if old_status != "suspended" and router:
                     try:
-                        block_ip(customer.ip_address)
-                        print(f"🔒 Blocked {customer.name} ({customer.ip_address})")
+                        block_ip(customer.ip_address, router)
+                        print(f"🔒 Blocked {customer.name} ({customer.ip_address}) on router {router.ip_address}")
                     except Exception as e:
-                        print(f"❌ Error blocking {customer.ip_address}: {e}")
+                        print(f"❌ Error blocking {customer.ip_address} on {router.ip_address}: {e}")
 
         db.commit()
+
     finally:
         if close_session:
             db.close()
+
+
 
 def run_scheduler():
     while True:

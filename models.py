@@ -40,14 +40,20 @@ class Router(Base):
     description = Column(String(255))
     branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False)
 
+    # ===== New fields for MikroTik API =====
+    username = Column(String(50), nullable=False, default="admin")
+    password = Column(String(100), nullable=False)  # store hashed if needed
+    port = Column(Integer, default=8728)            # API port, default 8728
+
     branch = relationship("Branch", back_populates="routers")
 
     # One router -> many customers
     customers = relationship(
         "Customer",
         back_populates="router",
-        cascade="all, delete-orphan"  # optional: delete customers if router is deleted
+        cascade="all, delete-orphan"
     )
+
 
 
 # ==================== CUSTOMER MODEL ====================

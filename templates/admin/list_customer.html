@@ -126,7 +126,7 @@
                     <th>Final Coordinates</th>
                     <th>Coordinates</th>
                     <th>Date Registered</th>
-                    <th>Password</th>
+                    
                     <th>Status</th>
                     <th>Actions</th>
                 </tr>
@@ -159,7 +159,7 @@
                     <td data-label="Date Registered">
                         {{ customer.start_date.strftime("%Y-%m-%d %H:%M:%S") if customer.start_date else '' }}
                     </td>
-                    <td data-label="Password">{{ customer.mikrotik_password }}</td>
+                    
                     <td data-label="Status">
                         {% if customer.status == "active" %}
                             <span class="badge bg-success">Active</span>

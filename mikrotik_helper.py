@@ -2,51 +2,49 @@
 import secrets
 
 # ==================== MIKROTIK API ====================
-# Assuming you use librouteros or any MikroTik API library
 # pip install librouteros
-
 from librouteros import connect
 
-# MikroTik connection settings
-MIKROTIK_HOST = "192.168.88.1"
-MIKROTIK_USER = "admin"
-MIKROTIK_PASS = "yourpassword"
-MIKROTIK_PORT = 8728  # default API port
+# ==================== MIKROTIK HELPER ====================
 
-
-def get_mikrotik_connection():
-    """Establish connection to MikroTik router."""
+def get_mikrotik_connection(host, user, password, port=8728):
+    """
+    Establish connection to a specific MikroTik router.
+    Returns the API connection or None on failure.
+    """
     try:
-        api = connect(
-            username=MIKROTIK_USER,
-            password=MIKROTIK_PASS,
-            host=MIKROTIK_HOST,
-            port=MIKROTIK_PORT
-        )
+        api = connect(username=user, password=password, host=host, port=port)
         return api
     except Exception as e:
-        print(f"Error connecting to MikroTik: {e}")
+        print(f"Error connecting to MikroTik {host}: {e}")
         return None
 
 
-# ==================== IP BLOCK / UNBLOCK ====================
-
-def block_ip(ip_address):
-    """Block a static IP via MikroTik firewall."""
-    api = get_mikrotik_connection()
+def block_ip(ip_address, router):
+    """
+    Block a static IP on a given router.
+    'router' should be an object or dict with:
+    - router.ip_address (host)
+    - router.username
+    - router.password
+    - router.port (optional, default 8728)
+    """
+    api = get_mikrotik_connection(router.ip_address, router.username, router.password, getattr(router, "port", 8728))
     if not api:
         return False
     try:
         api(cmd="/ip/firewall/address-list/add", address=ip_address, list="blocked")
         return True
     except Exception as e:
-        print(f"Error blocking IP {ip_address}: {e}")
+        print(f"Error blocking IP {ip_address} on {router.ip_address}: {e}")
         return False
 
 
-def unblock_ip(ip_address):
-    """Unblock a static IP via MikroTik firewall."""
-    api = get_mikrotik_connection()
+def unblock_ip(ip_address, router):
+    """
+    Unblock a static IP on a given router.
+    """
+    api = get_mikrotik_connection(router.ip_address, router.username, router.password, getattr(router, "port", 8728))
     if not api:
         return False
     try:
@@ -55,11 +53,12 @@ def unblock_ip(ip_address):
             api(cmd="/ip/firewall/address-list/remove", **{".id": r[".id"]})
         return True
     except Exception as e:
-        print(f"Error unblocking IP {ip_address}: {e}")
+        print(f"Error unblocking IP {ip_address} on {router.ip_address}: {e}")
         return False
 
-
+'''
 # ==================== PASSWORD GENERATOR ====================
 def generate_password(length=8):
     """Generate a random secure password for customer or router access."""
     return secrets.token_urlsafe(length)[:length]
+'''
