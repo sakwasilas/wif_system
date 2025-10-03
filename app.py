@@ -530,9 +530,11 @@ def grace_popup(ip_address):
         db.close()
 
 
-#======================WIFI ACCESS====================================
-from sqlalchemy.orm import joinedload
 # ==================== WIFI ACCESS ====================
+from sqlalchemy.orm import joinedload
+from datetime import datetime, timedelta
+from flask import session, redirect, url_for, render_template
+
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
     if not session.get("user_id"):
@@ -561,14 +563,16 @@ def wifi_access(ip_address):
         # ==================== ACTIVE ====================
         if today <= subscription_end:
             customer.status = "active"
+            status = "active"
             short_message = f"Your WiFi is active until {subscription_end}."
+            detailed_message = None
+
             if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
                 detailed_message = (
                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
                     f"({days_left} day(s) left).<br>"
-                    "Pay via Paybill <strong>4002057</strong><br>"
-                    f"Account No: <strong>{customer.account_no}</strong><br>"
-                    "Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
+                    "Please make payment to continue using the internet.<br>"
+                    f"Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
                 )
                 customer.pre_expiry_popup_shown = True
 
@@ -581,7 +585,9 @@ def wifi_access(ip_address):
         # ==================== GRACE ====================
         elif subscription_end < today <= grace_end:
             customer.status = "grace"
-            short_message = f"Your subscription expired on {subscription_end}. You are in grace until {grace_end}."
+            status = "grace"
+            short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
+            
             if not customer.popup_shown:
                 return redirect(url_for("grace_popup", ip_address=ip_address))
 
@@ -594,14 +600,14 @@ def wifi_access(ip_address):
         # ==================== SUSPENDED ====================
         else:
             customer.status = "suspended"
+            status = "suspended"
             short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
             detailed_message = (
                 f"Hi {customer.name}, your account is suspended.<br>"
-                f"Subscription expired on <strong>{subscription_end}</strong> and grace ended on <strong>{grace_end}</strong>.<br>"
-                "Pay via Paybill <strong>4002057</strong><br>"
-                f"Account No: <strong>{customer.account_no}</strong><br>"
-                "Forward Mpesa SMS to <strong>+254 790 924185</strong> after payment."
+                f"Please contact Intersurf Limited for more information:<br>"
+                f"+254 790 924185"
             )
+
             if router:
                 try:
                     block_ip(customer.ip_address, router)
@@ -610,7 +616,6 @@ def wifi_access(ip_address):
 
         db.commit()
 
-        # Render template while session is still open
         return render_template(
             "customer/wifi_home.html",
             customer=customer,
@@ -620,6 +625,7 @@ def wifi_access(ip_address):
         )
     finally:
         db.close()
+
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
 @app.route("/grace_customers")
