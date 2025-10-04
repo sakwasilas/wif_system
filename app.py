@@ -300,6 +300,24 @@ def delete_router(router_id):
         db.close()
     return redirect(url_for("list_routers"))
 
+# ================== FETCH ROUTER IP BY BRANCH ==================
+from flask import jsonify
+
+@app.route("/get_router_ip/<int:branch_id>")
+def get_router_ip(branch_id):
+    db = SessionLocal()
+    try:
+        router = db.query(Router).filter(Router.branch_id == branch_id).first()
+        if router:
+            return jsonify({
+                "id": router.id,
+                "ip_address": router.ip_address
+            })
+        return jsonify({})
+    finally:
+        db.close()
+
+
 
 
 # ==================== ADMIN DASHBOARD ====================
@@ -335,6 +353,7 @@ def add_customer():
     try:
         routers = db.query(Router).all()
         branches = db.query(Branch).all()
+
         if request.method == "POST":
             account_no = request.form.get("account_no") or generate_account_no()
             customer = Customer(
@@ -348,26 +367,42 @@ def add_customer():
                 router_id=request.form.get("router_id"),
                 start_date=request.form.get("start_date") or datetime.utcnow(),
                 contract_date=request.form.get("contract_date") or None,
-                
             )
+
             db.add(customer)
             db.commit()
-            if any([request.form.get(f) for f in ["cable_no", "final_coordinates", "loop_no", "power_level", "coordinates"]]):
+
+            # Check if any CustomerNetwork fields are provided
+            if any([
+                request.form.get(f)
+                for f in [
+                    "cable_no", "cable_type", "splitter", "tube_no", "core_used",
+                    "final_coordinates", "loop_no", "power_level", "coordinates"
+                ]
+            ]):
                 network = CustomerNetwork(
                     customer_id=customer.id,
                     cable_no=request.form.get("cable_no"),
+                    cable_type=request.form.get("cable_type"),
+                    splitter=request.form.get("splitter"),
+                    tube_no=request.form.get("tube_no"),
+                    core_used=request.form.get("core_used"),
                     final_coordinates=request.form.get("final_coordinates"),
                     loop_no=request.form.get("loop_no"),
                     power_level=request.form.get("power_level"),
-                    coordinates=request.form.get("coordinates")
+                    coordinates=request.form.get("coordinates"),
                 )
                 db.add(network)
                 db.commit()
+
             flash("Customer added successfully!", "success")
             return redirect(url_for("list_customers"))
+
     finally:
         db.close()
+
     return render_template("admin/add_new_customer.html", routers=routers, branches=branches)
+
 
 # ==================== LIST / EDIT / DELETE CUSTOMERS ====================
 @app.route("/customers")
@@ -408,18 +443,23 @@ def list_customers():
 def edit_customer(customer_id):
     if not session.get("user_id"):
         return redirect(url_for("login"))
+
     db = SessionLocal()
     try:
         customer = db.query(Customer).options(
             joinedload(Customer.router).joinedload(Router.branch),
             joinedload(Customer.network)
         ).filter(Customer.id == customer_id).first()
+
         if not customer:
             flash("Customer not found", "danger")
             return redirect(url_for("list_customers"))
+
         branches = db.query(Branch).all()
         routers = db.query(Router).all()
+
         if request.method == "POST":
+            # ==================== CUSTOMER BASIC DETAILS ====================
             customer.account_no = request.form.get("account_no")
             customer.name = request.form.get("name")
             customer.phone = request.form.get("phone")
@@ -429,23 +469,43 @@ def edit_customer(customer_id):
             customer.billing_amount = request.form.get("billing_amount")
             customer.start_date = request.form.get("start_date")
             customer.contract_date = request.form.get("contract_date")
+            customer.branch_id = request.form.get("branch_id")
             customer.router_id = request.form.get("router_id")
+
+            # Optional: update router_ip if present in model
+            router_ip = request.form.get("router_ip")
+            if hasattr(customer, "router_ip") and router_ip:
+                customer.router_ip = router_ip
+
+            # ==================== NETWORK DETAILS ====================
             if customer.network:
                 network = customer.network
             else:
                 network = CustomerNetwork(customer_id=customer.id)
                 customer.network = network
+
             network.cable_no = request.form.get("cable_no")
             network.final_coordinates = request.form.get("final_coordinates")
             network.loop_no = request.form.get("loop_no")
             network.power_level = request.form.get("power_level")
             network.coordinates = request.form.get("coordinates")
+
+            # ✅ NEW FIELDS ADDED HERE
+            network.cable_type = request.form.get("cable_type")
+            network.splitter = request.form.get("splitter")
+            network.tube_no = request.form.get("tube_no")
+            network.core_used = request.form.get("core_used")
+
+            # ==================== SAVE CHANGES ====================
             db.add(customer)
             db.commit()
-            flash("Customer updated successfully!", "success")
+
+            flash("✅ Customer updated successfully!", "success")
             return redirect(url_for("list_customers"))
+
     finally:
         db.close()
+
     return render_template(
         "admin/edit_customer.html",
         customer=customer,
@@ -453,6 +513,7 @@ def edit_customer(customer_id):
         routers=routers,
         network=customer.network
     )
+
 
 @app.route("/delete_customer/<int:customer_id>", methods=["POST"])
 def delete_customer(customer_id):
@@ -472,7 +533,7 @@ def delete_customer(customer_id):
     return redirect(url_for("list_customers"))
 
 # ==================== GRACE / WIFI ACCESS ====================
-# ==================== GRACE POPUP ====================
+
 @app.route("/grace_popup/<ip_address>", methods=["GET", "POST"])
 def grace_popup(ip_address):
     if not session.get("user_id"):
@@ -532,8 +593,6 @@ def grace_popup(ip_address):
 
 # ==================== WIFI ACCESS ====================
 from sqlalchemy.orm import joinedload
-from datetime import datetime, timedelta
-from flask import session, redirect, url_for, render_template
 
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
@@ -818,4 +877,3 @@ threading.Thread(target=run_scheduler, daemon=True).start()
 # ==================== RUN APP ====================
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
-

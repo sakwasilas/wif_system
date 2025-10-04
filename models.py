@@ -66,12 +66,9 @@ class Customer(Base):
     email = Column(String(255))
     ip_address = Column(String(50), nullable=False, unique=True)
     location = Column(String(255))
-   
     billing_amount = Column(Float, nullable=False)
-
     start_date = Column(DateTime, nullable=True)
     contract_date = Column(DateTime, nullable=True)
-
     grace_days = Column(Integer, default=0)
     status = Column(String(50), default="active")
     popup_shown = Column(Boolean, default=False)
@@ -101,6 +98,12 @@ class CustomerNetwork(Base):
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, unique=True)
 
     cable_no = Column(String(50))
+    cable_type = Column(String(50))#new
+    loop_no = Column(String(50))
+    splitter=Column(String(50))#new
+    tube_no=Column(String(50))#new
+    core_used=Column(String(50))#new
+
     final_coordinates = Column(String(50))
     loop_no = Column(String(50))
     power_level = Column(String(50))
