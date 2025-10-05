@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 
 # ==================== MIKROTIK HELPER ====================
-from mikrotik_helper import block_ip, unblock_ip
+from mikrotik_helper import block_ip, unblock_ip, get_mikrotik_connection
+
 
 # ==================== THIRD-PARTY ====================
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -316,6 +317,39 @@ def get_router_ip(branch_id):
         return jsonify({})
     finally:
         db.close()
+
+# ==================== TEST ROUTER CONNECTION ====================
+@app.route("/test_router/<int:router_id>", methods=["GET"])
+def test_router(router_id):
+    """Test if a router connection works and basic commands run."""
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    db = SessionLocal()
+    try:
+        router = db.query(Router).filter_by(id=router_id).first()
+        if not router:
+            flash("Router not found.", "danger")
+            return redirect(url_for("list_routers"))
+
+        api = get_mikrotik_connection(router.ip_address, router.username, router.password, router.port)
+        if not api:
+            flash(f"❌ Failed to connect to router {router.ip_address}. Check credentials or API service.", "danger")
+            return redirect(url_for("list_routers"))
+
+        # ✅ Try a simple MikroTik command
+        interfaces = list(api(cmd="/interface/print"))
+        if interfaces:
+            flash(f"✅ Connected successfully to router {router.ip_address}. Found {len(interfaces)} interfaces.", "success")
+        else:
+            flash(f"✅ Connected to router {router.ip_address}, but no interfaces found.", "warning")
+
+    except Exception as e:
+        flash(f"❌ Error testing router: {e}", "danger")
+    finally:
+        db.close()
+
+    return redirect(url_for("list_routers"))
 
 
 

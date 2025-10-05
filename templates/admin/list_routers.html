@@ -31,20 +31,27 @@
                     <td>{{ router.branch.name if router.branch else "" }}</td>
                     <td>{{ router.username }}</td>
                     <td>{{ router.port }}</td>
-                    <td>
-                        <a href="{{ url_for('edit_router', router_id=router.id) }}" class="btn btn-sm btn-primary">Edit</a>
+                    <td class="d-flex justify-content-center gap-2 flex-wrap">
+                        <a href="{{ url_for('edit_router', router_id=router.id) }}" class="btn btn-sm btn-primary">
+                            Edit
+                        </a>
+
+                        <!-- ✅ Test Connection Button Only -->
+                        <a href="{{ url_for('test_router', router_id=router.id) }}" class="btn btn-sm btn-info">
+                            Test Connection
+                        </a>
+
+                        <!-- Delete Form -->
                         <form action="{{ url_for('delete_router', router_id=router.id) }}" method="POST" style="display:inline;">
-                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this router?');">Delete</button>
+                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this router?');">
+                                Delete
+                            </button>
                         </form>
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
-    </div>
-
-    <div class="mt-3">
-        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-dark">⬅ Back to Dashboard</a>
     </div>
 </div>
 
