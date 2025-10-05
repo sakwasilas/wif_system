@@ -345,52 +345,43 @@ def admin_dashboard():
         db.close()
 
 # ==================== CUSTOMER MANAGEMENT ====================
+# ==================== CUSTOMER MANAGEMENT ====================
 @app.route("/add_customer", methods=["GET", "POST"])
 def add_customer():
     if not session.get("user_id"):
         return redirect(url_for("login"))
-
     db = SessionLocal()
     try:
         routers = db.query(Router).all()
         branches = db.query(Branch).all()
 
         if request.method == "POST":
-            router_id = request.form.get("router_id")
+            customer_ip = request.form.get("ip_address")
 
-            # ✅ Get IP address from the selected router
-            router = db.query(Router).filter_by(id=router_id).first()
-            ip_address = router.ip_address if router and router.ip_address else None
-
-            # ✅ Validate IP presence
-            if not ip_address:
-                flash("Router IP address not found. Please assign manually.", "danger")
+            # ✅ Check if the customer IP already exists
+            existing_customer = db.query(Customer).filter_by(ip_address=customer_ip).first()
+            if existing_customer:
+                flash(f"❌ IP address {customer_ip} is already assigned to another customer.", "danger")
                 return redirect(url_for("add_customer"))
 
             account_no = request.form.get("account_no") or generate_account_no()
-
             customer = Customer(
                 account_no=account_no,
                 name=request.form.get("name"),
                 phone=request.form.get("phone"),
                 email=request.form.get("email"),
                 location=request.form.get("location"),
-                ip_address=ip_address,  # ✅ Always filled now
+                ip_address=customer_ip,  # Customer IP (manual)
                 billing_amount=float(request.form.get("billing_amount")),
-                router_id=router_id,
+                router_id=request.form.get("router_id"),  # Router selected, auto IP shown
                 start_date=request.form.get("start_date") or datetime.utcnow(),
                 contract_date=request.form.get("contract_date") or None,
             )
 
-            try:
-                db.add(customer)
-                db.commit()
-            except Exception as e:
-                db.rollback()
-                flash(f"Database error: {str(e)}", "danger")
-                return redirect(url_for("add_customer"))
+            db.add(customer)
+            db.commit()
 
-            # ✅ Add CustomerNetwork if details are provided
+            # ✅ Check if network details exist
             if any([
                 request.form.get(f)
                 for f in [
@@ -413,7 +404,7 @@ def add_customer():
                 db.add(network)
                 db.commit()
 
-            flash("Customer added successfully!", "success")
+            flash("✅ Customer added successfully!", "success")
             return redirect(url_for("list_customers"))
 
     finally:
