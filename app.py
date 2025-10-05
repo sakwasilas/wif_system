@@ -658,9 +658,101 @@ def grace_popup(ip_address):
         db.close()
 
 
+
+
+# @app.route("/wifi_access/<ip_address>")
+# def wifi_access(ip_address):
+#     if not session.get("user_id"):
+#         return redirect(url_for("login"))
+
+#     db = SessionLocal()
+#     try:
+#         customer = db.query(Customer).options(
+#             joinedload(Customer.router).joinedload(Router.branch),
+#             joinedload(Customer.network)
+#         ).filter_by(ip_address=ip_address).first()
+
+#         if not customer:
+#             return "Customer not found", 404
+
+#         router = customer.router
+#         today = datetime.utcnow().date()
+#         start_date = customer.start_date.date() if customer.start_date else today
+#         subscription_end = start_date + timedelta(days=30)
+#         grace_days = customer.grace_days or 1
+#         grace_end = subscription_end + timedelta(days=grace_days)
+#         days_left = (subscription_end - today).days
+
+#         status = short_message = detailed_message = None
+
+#         # ==================== ACTIVE ====================
+#         if today <= subscription_end:
+#             customer.status = "active"
+#             status = "active"
+#             short_message = f"Your WiFi is active until {subscription_end}."
+#             detailed_message = None
+
+#             if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
+#                 detailed_message = (
+#                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
+#                     f"({days_left} day(s) left).<br>"
+#                     "Please make payment to continue using the internet.<br>"
+#                     f"Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
+#                 )
+#                 customer.pre_expiry_popup_shown = True
+
+#             if router:
+#                 try:
+#                     unblock_ip(customer.ip_address, router)
+#                 except Exception as e:
+#                     print(f"Error unblocking {customer.ip_address} on router {router.ip_address}: {e}")
+
+#         # ==================== GRACE ====================
+#         elif subscription_end < today <= grace_end:
+#             customer.status = "grace"
+#             status = "grace"
+#             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
+            
+#             if not customer.popup_shown:
+#                 return redirect(url_for("grace_popup", ip_address=ip_address))
+
+#             if router:
+#                 try:
+#                     unblock_ip(customer.ip_address, router)
+#                 except Exception as e:
+#                     print(f"Error unblocking {customer.ip_address} on router {router.ip_address}: {e}")
+
+#         # ==================== SUSPENDED ====================
+#         else:
+#             customer.status = "suspended"
+#             status = "suspended"
+#             short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
+#             detailed_message = (
+#                 f"Hi {customer.name}, your account is suspended.<br>"
+#                 f"Please contact Intersurf Limited for more information:<br>"
+#                 f"+254 790 924185"
+#             )
+
+#             if router:
+#                 try:
+#                     block_ip(customer.ip_address, router)
+#                 except Exception as e:
+#                     print(f"Error blocking {customer.ip_address} on router {router.ip_address}: {e}")
+
+#         db.commit()
+
+#         return render_template(
+#             "customer/wifi_home.html",
+#             customer=customer,
+#             status=status,
+#             short_message=short_message,
+#             detailed_message=detailed_message
+#         )
+#     finally:
+#         db.close()
+
 # ==================== WIFI ACCESS ====================
 from sqlalchemy.orm import joinedload
-
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
     if not session.get("user_id"):
@@ -693,6 +785,7 @@ def wifi_access(ip_address):
             short_message = f"Your WiFi is active until {subscription_end}."
             detailed_message = None
 
+            # Pre-expiry popup
             if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
                 detailed_message = (
                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
@@ -702,6 +795,7 @@ def wifi_access(ip_address):
                 )
                 customer.pre_expiry_popup_shown = True
 
+            # ✅ Ensure active users are unblocked
             if router:
                 try:
                     unblock_ip(customer.ip_address, router)
@@ -713,7 +807,7 @@ def wifi_access(ip_address):
             customer.status = "grace"
             status = "grace"
             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
-            
+
             if not customer.popup_shown:
                 return redirect(url_for("grace_popup", ip_address=ip_address))
 
@@ -734,6 +828,7 @@ def wifi_access(ip_address):
                 f"+254 790 924185"
             )
 
+            # ✅ Key Change: Ensure IP is blocked immediately
             if router:
                 try:
                     block_ip(customer.ip_address, router)
@@ -751,6 +846,7 @@ def wifi_access(ip_address):
         )
     finally:
         db.close()
+
 
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
@@ -934,10 +1030,10 @@ def daily_status_check(db=None):
 
 
 
-def run_scheduler():
+ef run_scheduler():
     while True:
-        daily_status_check()
-        time.sleep(24 * 60 * 60)
+        daily_status_check()  # check all customers
+        time.sleep(60)
 
 threading.Thread(target=run_scheduler, daemon=True).start()
 
