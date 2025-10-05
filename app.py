@@ -345,7 +345,7 @@ def admin_dashboard():
         db.close()
 
 # ==================== CUSTOMER MANAGEMENT ====================
-# ==================== CUSTOMER MANAGEMENT ====================
+
 @app.route("/add_customer", methods=["GET", "POST"])
 def add_customer():
     if not session.get("user_id"):
@@ -378,10 +378,27 @@ def add_customer():
                 contract_date=request.form.get("contract_date") or None,
             )
 
-            db.add(customer)
-            db.commit()
+            try:
+                db.add(customer)
+                db.commit()
+            except Exception as e:
+                db.rollback()
 
-            # ✅ Check if network details exist
+                # ✅ Friendly duplicate & general error handling
+                error_msg = str(e)
+                if "duplicate key value violates unique constraint" in error_msg:
+                    if "customers_ip_address_key" in error_msg:
+                        flash("❌ This IP address is already registered to another customer.", "danger")
+                    elif "customers_account_no_key" in error_msg:
+                        flash("⚠️ This account number already exists. Please try again.", "warning")
+                    else:
+                        flash("⚠️ Duplicate entry found. Please check your input.", "warning")
+                else:
+                    flash("❌ An unexpected error occurred while adding the customer.", "danger")
+
+                return redirect(url_for("add_customer"))
+
+            # ✅ Add network details if provided
             if any([
                 request.form.get(f)
                 for f in [
@@ -465,7 +482,21 @@ def edit_customer(customer_id):
             return redirect(url_for("list_customers"))
 
         branches = db.query(Branch).all()
-        routers = db.query(Router).all()
+
+        # ✅ When branch changes, auto-fetch router for that branch
+        branch_id = request.args.get("branch_id")
+        router_ip = None
+        router_id = None
+
+        if branch_id:
+            router = db.query(Router).filter(Router.branch_id == branch_id).first()
+            if router:
+                router_ip = router.ip_address
+                router_id = router.id
+        else:
+            if customer.router:
+                router_ip = customer.router.ip_address
+                router_id = customer.router.id
 
         if request.method == "POST":
             # ==================== CUSTOMER BASIC DETAILS ====================
@@ -479,12 +510,9 @@ def edit_customer(customer_id):
             customer.start_date = request.form.get("start_date")
             customer.contract_date = request.form.get("contract_date")
             customer.branch_id = request.form.get("branch_id")
-            customer.router_id = request.form.get("router_id")
 
-            # Optional: update router_ip if present in model
-            router_ip = request.form.get("router_ip")
-            if hasattr(customer, "router_ip") and router_ip:
-                customer.router_ip = router_ip
+            # ✅ Assign router automatically
+            customer.router_id = router_id
 
             # ==================== NETWORK DETAILS ====================
             if customer.network:
@@ -498,14 +526,11 @@ def edit_customer(customer_id):
             network.loop_no = request.form.get("loop_no")
             network.power_level = request.form.get("power_level")
             network.coordinates = request.form.get("coordinates")
-
-            # ✅ NEW FIELDS ADDED HERE
             network.cable_type = request.form.get("cable_type")
             network.splitter = request.form.get("splitter")
             network.tube_no = request.form.get("tube_no")
             network.core_used = request.form.get("core_used")
 
-            # ==================== SAVE CHANGES ====================
             db.add(customer)
             db.commit()
 
@@ -519,10 +544,9 @@ def edit_customer(customer_id):
         "admin/edit_customer.html",
         customer=customer,
         branches=branches,
-        routers=routers,
+        router_ip=router_ip,
         network=customer.network
     )
-
 
 @app.route("/delete_customer/<int:customer_id>", methods=["POST"])
 def delete_customer(customer_id):
