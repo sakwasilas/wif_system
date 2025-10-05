@@ -349,30 +349,48 @@ def admin_dashboard():
 def add_customer():
     if not session.get("user_id"):
         return redirect(url_for("login"))
+
     db = SessionLocal()
     try:
         routers = db.query(Router).all()
         branches = db.query(Branch).all()
 
         if request.method == "POST":
+            router_id = request.form.get("router_id")
+
+            # ✅ Get IP address from the selected router
+            router = db.query(Router).filter_by(id=router_id).first()
+            ip_address = router.ip_address if router and router.ip_address else None
+
+            # ✅ Validate IP presence
+            if not ip_address:
+                flash("Router IP address not found. Please assign manually.", "danger")
+                return redirect(url_for("add_customer"))
+
             account_no = request.form.get("account_no") or generate_account_no()
+
             customer = Customer(
                 account_no=account_no,
                 name=request.form.get("name"),
                 phone=request.form.get("phone"),
                 email=request.form.get("email"),
                 location=request.form.get("location"),
-                ip_address=request.form.get("ip_address"),
+                ip_address=ip_address,  # ✅ Always filled now
                 billing_amount=float(request.form.get("billing_amount")),
-                router_id=request.form.get("router_id"),
+                router_id=router_id,
                 start_date=request.form.get("start_date") or datetime.utcnow(),
                 contract_date=request.form.get("contract_date") or None,
             )
 
-            db.add(customer)
-            db.commit()
+            try:
+                db.add(customer)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                flash(f"Database error: {str(e)}", "danger")
+                return redirect(url_for("add_customer"))
 
-            # Check if any CustomerNetwork fields are provided
+            # ✅ Add CustomerNetwork if details are provided
             if any([
                 request.form.get(f)
                 for f in [
