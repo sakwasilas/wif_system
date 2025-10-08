@@ -15,7 +15,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session, declarative_base
 
 # ✅ New database URL
-DATABASE_URL = "postgresql://wifi_afq5_user:yPDLc4g2zYSCpC9eOYRpCpyEk1szFbmU@dpg-d3a0so95pdvs73e10m5g-a.oregon-postgres.render.com:5432/wifi_afq5?sslmode=require"
+DATABASE_URL = "postgresql://wifi_768w_user:vXXoeIiRW20ZcENUqUvNs9I3JztgSJK9@dpg-d3j7r00dl3ps73dmtuq0-a.oregon-postgres.render.com:5432/wifi_768w?sslmode=require"
+
 
 engine = create_engine(DATABASE_URL)
 
