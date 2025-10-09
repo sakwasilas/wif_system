@@ -54,8 +54,6 @@ class Router(Base):
         cascade="all, delete-orphan"
     )
 
-
-
 # ==================== CUSTOMER MODEL ====================
 class Customer(Base):
     __tablename__ = "customers"
