@@ -27,7 +27,7 @@ class Branch(Base):
     routers = relationship(
         "Router",
         back_populates="branch",
-        cascade="all, delete-orphan"  # delete routers if branch is deleted
+        cascade="all, delete-orphan"
     )
 
 
@@ -54,6 +54,7 @@ class Router(Base):
         cascade="all, delete-orphan"
     )
 
+
 # ==================== CUSTOMER MODEL ====================
 class Customer(Base):
     __tablename__ = "customers"
@@ -75,6 +76,12 @@ class Customer(Base):
     account_no = Column(String(50), nullable=False, unique=True)
     mikrotik_password = Column(String(100))
 
+    # Manual control fields (new)
+    is_suspended = Column(Boolean, default=False, nullable=False)       # admin suspended
+    is_on_hold = Column(Boolean, default=False, nullable=False)         # admin put on hold
+    hold_start_date = Column(DateTime, nullable=True)                   # when hold started
+    last_activation_date = Column(DateTime, nullable=True)              # last activation time (for 30-day cycle)
+
     # Foreign key -> Router
     router_id = Column(Integer, ForeignKey("routers.id"))
 
@@ -84,7 +91,7 @@ class Customer(Base):
         "CustomerNetwork",
         back_populates="customer",
         uselist=False,
-        cascade="all, delete-orphan"  # delete network automatically if customer is deleted
+        cascade="all, delete-orphan"
     )
 
 
@@ -96,14 +103,13 @@ class CustomerNetwork(Base):
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, unique=True)
 
     cable_no = Column(String(50))
-    cable_type = Column(String(50))#new
+    cable_type = Column(String(50))
     loop_no = Column(String(50))
-    splitter=Column(String(50))#new
-    tube_no=Column(String(50))#new
-    core_used=Column(String(50))#new
+    splitter = Column(String(50))
+    tube_no = Column(String(50))
+    core_used = Column(String(50))
 
     final_coordinates = Column(String(50))
-    loop_no = Column(String(50))
     power_level = Column(String(50))
     coordinates = Column(String(255))
 

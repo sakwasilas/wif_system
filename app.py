@@ -786,7 +786,10 @@ def mark_paid(customer_id):
 
     # Redirect to list of all customers
     return redirect(url_for("list_customers"))
+'''' New routes to activate diactivate and put customer on hold manually '''
 
+
+#manually activate ,deactivate and put on hold end
 
 # ==================== EXPORT TO EXCEL ====================
 @app.route("/customers/export", methods=["GET"])
