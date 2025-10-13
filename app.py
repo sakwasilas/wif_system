@@ -652,6 +652,82 @@ def grace_popup(ip_address):
         db.close()
 
 #========wifi acess==================================================
+# @app.route("/wifi_access/<ip_address>")
+# def wifi_access(ip_address):
+#     if not session.get("user_id"):
+#         return redirect(url_for("login"))
+
+#     db = SessionLocal()
+#     try:
+#         customer = db.query(Customer).options(
+#             joinedload(Customer.router)
+#         ).filter_by(ip_address=ip_address).first()
+
+#         if not customer:
+#             return "Customer not found", 404
+
+#         router = customer.router
+#         today = datetime.utcnow().date()
+#         start_date = customer.start_date.date() if customer.start_date else today
+#         subscription_end = start_date + timedelta(days=30)
+#         grace_days = customer.grace_days or 1
+#         grace_end = subscription_end + timedelta(days=grace_days)
+#         days_left = (subscription_end - today).days if today <= subscription_end else 0
+
+#         status = short_message = detailed_message = None
+
+#         # ==================== ACTIVE ====================
+#         if today <= subscription_end:
+#             customer.status = "active"
+#             status = "active"
+#             short_message = f"Your WiFi is active until {subscription_end}."
+#             if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
+#                 detailed_message = (
+#                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
+#                     f"({days_left} day(s) left).<br>"
+#                     "Please make payment to continue using the internet.<br>"
+#                     f"Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
+#                 )
+#                 customer.pre_expiry_popup_shown = True
+
+#             if router:
+#                 unblock_ip(customer.ip_address, router)
+
+#         # ==================== GRACE ====================
+#         elif subscription_end < today <= grace_end:
+#             customer.status = "grace"
+#             status = "grace"
+#             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
+#             if router:
+#                 unblock_ip(customer.ip_address, router)
+
+#         # ==================== SUSPENDED ====================
+#         else:
+#             customer.status = "suspended"
+#             status = "suspended"
+#             short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
+#             detailed_message = (
+#                 f"Hi {customer.name}, your account is suspended.<br>"
+#                 f"Please contact Intersurf Limited for more information:<br>"
+#                 f"+254 790 924185"
+#             )
+#             if router:
+#                 block_ip(customer.ip_address, router)
+
+#         db.commit()
+
+#         return render_template(
+#             "wifi_home.html",
+#             customer=customer,
+#             status=status,
+#             short_message=short_message,
+#             detailed_message=detailed_message,
+#             days_left=days_left,
+#             current_year=datetime.utcnow().year
+#         )
+#     finally:
+#         db.close()
+# ==================== WIFI ACCESS ====================
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
     if not session.get("user_id"):
@@ -659,10 +735,7 @@ def wifi_access(ip_address):
 
     db = SessionLocal()
     try:
-        customer = db.query(Customer).options(
-            joinedload(Customer.router)
-        ).filter_by(ip_address=ip_address).first()
-
+        customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(ip_address=ip_address).first()
         if not customer:
             return "Customer not found", 404
 
@@ -686,36 +759,42 @@ def wifi_access(ip_address):
                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
                     f"({days_left} day(s) left).<br>"
                     "Please make payment to continue using the internet.<br>"
-                    f"Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
+                    "Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
                 )
                 customer.pre_expiry_popup_shown = True
 
-            if router:
+            if router and router.ip_address:
                 unblock_ip(customer.ip_address, router)
 
-        # ==================== GRACE ====================
+        # ==================== GRACE PERIOD ====================
         elif subscription_end < today <= grace_end:
             customer.status = "grace"
             status = "grace"
             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
-            if router:
+            if router and router.ip_address:
                 unblock_ip(customer.ip_address, router)
 
         # ==================== SUSPENDED ====================
         else:
             customer.status = "suspended"
             status = "suspended"
-            short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
+            short_message = (
+                f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
+            )
             detailed_message = (
                 f"Hi {customer.name}, your account is suspended.<br>"
                 f"Please contact Intersurf Limited for more information:<br>"
-                f"+254 790 924185"
+                f"<strong>+254 790 924185</strong>"
             )
-            if router:
+
+            # 🔒 Block first before rendering
+            if router and router.ip_address:
                 block_ip(customer.ip_address, router)
+                print(f"🔒 {customer.name} ({customer.ip_address}) has been blocked.")
 
         db.commit()
 
+        # Render the WiFi home page (popup/status message)
         return render_template(
             "wifi_home.html",
             customer=customer,
@@ -727,6 +806,7 @@ def wifi_access(ip_address):
         )
     finally:
         db.close()
+
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
 @app.route("/grace_customers")
