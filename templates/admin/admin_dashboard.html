@@ -126,13 +126,18 @@
                     Welcome back, <strong>{{ username }}</strong>! 🎉
                 </div>
 
-                <!-- Example content cards -->
                 <div class="card shadow-sm">
                     <div class="card-body">
                         <h5 class="card-title">Customer Management</h5>
-                        <p class="card-text text-muted small">View, edit, or delete customer accounts.</p>
-                    </div>
-                </div>
+                             <a href="{{ url_for('manual_manage_customers') }}" class="btn btn-danger btn-sm w-100 mb-2">
+                                    ⚙️ Manage Customers Manually
+                                                     </a>
+                                            <p class="card-text text-muted small">
+                                                 Manually suspend, unsuspend, hold, or unhold customer accounts.
+                                                     </p>
+                                                             </div>
+                                                                            </div>
+
 
                 <div class="card shadow-sm">
                     <div class="card-body">

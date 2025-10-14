@@ -55,7 +55,6 @@ class Router(Base):
     )
 
 
-# ==================== CUSTOMER MODEL ====================
 class Customer(Base):
     __tablename__ = "customers"
 
@@ -76,24 +75,15 @@ class Customer(Base):
     account_no = Column(String(50), nullable=False, unique=True)
     mikrotik_password = Column(String(100))
 
-    # Manual control fields (new)
-    is_suspended = Column(Boolean, default=False, nullable=False)       # admin suspended
-    is_on_hold = Column(Boolean, default=False, nullable=False)         # admin put on hold
-    hold_start_date = Column(DateTime, nullable=True)                   # when hold started
-    last_activation_date = Column(DateTime, nullable=True)              # last activation time (for 30-day cycle)
+    manually_suspended = Column(Boolean, default=False)
+    hold_status = Column(Boolean, default=False)
+    activated_on = Column(DateTime, nullable=True)
+    hold_until = Column(DateTime, nullable=True)  # 👈 New field
 
-    # Foreign key -> Router
     router_id = Column(Integer, ForeignKey("routers.id"))
 
-    # Relationships
     router = relationship("Router", back_populates="customers")
-    network = relationship(
-        "CustomerNetwork",
-        back_populates="customer",
-        uselist=False,
-        cascade="all, delete-orphan"
-    )
-
+    network = relationship("CustomerNetwork", back_populates="customer", uselist=False, cascade="all, delete-orphan")
 
 # ==================== CUSTOMER NETWORK MODEL ====================
 class CustomerNetwork(Base):

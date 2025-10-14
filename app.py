@@ -1,7 +1,7 @@
 # ==================== STANDARD LIBRARY ====================
 import threading
 import time
-import random
+
 import io
 from datetime import datetime, timedelta
 
@@ -651,82 +651,6 @@ def grace_popup(ip_address):
     finally:
         db.close()
 
-#========wifi acess==================================================
-# @app.route("/wifi_access/<ip_address>")
-# def wifi_access(ip_address):
-#     if not session.get("user_id"):
-#         return redirect(url_for("login"))
-
-#     db = SessionLocal()
-#     try:
-#         customer = db.query(Customer).options(
-#             joinedload(Customer.router)
-#         ).filter_by(ip_address=ip_address).first()
-
-#         if not customer:
-#             return "Customer not found", 404
-
-#         router = customer.router
-#         today = datetime.utcnow().date()
-#         start_date = customer.start_date.date() if customer.start_date else today
-#         subscription_end = start_date + timedelta(days=30)
-#         grace_days = customer.grace_days or 1
-#         grace_end = subscription_end + timedelta(days=grace_days)
-#         days_left = (subscription_end - today).days if today <= subscription_end else 0
-
-#         status = short_message = detailed_message = None
-
-#         # ==================== ACTIVE ====================
-#         if today <= subscription_end:
-#             customer.status = "active"
-#             status = "active"
-#             short_message = f"Your WiFi is active until {subscription_end}."
-#             if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
-#                 detailed_message = (
-#                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
-#                     f"({days_left} day(s) left).<br>"
-#                     "Please make payment to continue using the internet.<br>"
-#                     f"Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
-#                 )
-#                 customer.pre_expiry_popup_shown = True
-
-#             if router:
-#                 unblock_ip(customer.ip_address, router)
-
-#         # ==================== GRACE ====================
-#         elif subscription_end < today <= grace_end:
-#             customer.status = "grace"
-#             status = "grace"
-#             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
-#             if router:
-#                 unblock_ip(customer.ip_address, router)
-
-#         # ==================== SUSPENDED ====================
-#         else:
-#             customer.status = "suspended"
-#             status = "suspended"
-#             short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
-#             detailed_message = (
-#                 f"Hi {customer.name}, your account is suspended.<br>"
-#                 f"Please contact Intersurf Limited for more information:<br>"
-#                 f"+254 790 924185"
-#             )
-#             if router:
-#                 block_ip(customer.ip_address, router)
-
-#         db.commit()
-
-#         return render_template(
-#             "wifi_home.html",
-#             customer=customer,
-#             status=status,
-#             short_message=short_message,
-#             detailed_message=detailed_message,
-#             days_left=days_left,
-#             current_year=datetime.utcnow().year
-#         )
-#     finally:
-#         db.close()
 # ==================== WIFI ACCESS ====================
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
@@ -869,7 +793,7 @@ def mark_paid(customer_id):
 '''' New routes to activate diactivate and put customer on hold manually '''
 
 
-#manually activate ,deactivate and put on hold end
+
 
 # ==================== EXPORT TO EXCEL ====================
 @app.route("/customers/export", methods=["GET"])
@@ -925,6 +849,105 @@ def export_customers():
         as_attachment=True,
         download_name="customers.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+    )
+
+@app.route("/manual_suspension")
+def manual_suspension():
+    db = SessionLocal()
+    customers = db.query(Customer).all()
+    db.close()
+    return render_template("admin/manually.html", customers=customers)
+
+@app.route("/toggle_suspend/<int:customer_id>")
+def toggle_suspend(customer_id):
+    db = SessionLocal()
+    customer = db.query(Customer).get(customer_id)
+
+    if customer:
+        if customer.manually_suspended:
+            # Unsuspend manually
+            customer.manually_suspended = False
+            customer.status = "active"
+            flash(f"{customer.name} has been unsuspended manually.", "success")
+        else:
+            # Suspend manually
+            customer.manually_suspended = True
+            customer.status = "manually_suspended"
+            flash(f"{customer.name} has been manually suspended.", "warning")
+
+        db.commit()
+    db.close()
+    return redirect(url_for('manual_suspension'))
+
+@app.route("/toggle_hold/<int:customer_id>")
+def toggle_hold(customer_id):
+    db = SessionLocal()
+    customer = db.query(Customer).get(customer_id)
+    if customer:
+        if customer.hold_status:
+            # Unhold (activate)
+            customer.hold_status = False
+            customer.status = "active"
+            customer.activated_on = datetime.now()
+        else:
+            # Put on hold
+            customer.hold_status = True
+            customer.status = "on_hold"
+        db.commit()
+    db.close()
+    return redirect(url_for('manual_suspension'))
+
+@app.route("/manual_hold")
+def manual_hold():
+    db_session = SessionLocal()
+    customers = db_session.query(Customer).all()
+    db_session.close()
+    current_date = datetime.utcnow().strftime("%Y-%m-%d")
+    return render_template("admin/manual_hold.html", customers=customers, current_date=current_date)
+
+# Hold customer with selected date
+@app.route('/hold_customer/<int:customer_id>', methods=['POST'])
+def hold_customer(customer_id):
+    db = SessionLocal()
+    customer = db.query(Customer).get(customer_id)
+    if customer:
+        hold_until_str = request.form.get('hold_until')
+        if hold_until_str:
+            hold_until = datetime.strptime(hold_until_str, "%Y-%m-%d")
+            customer.hold_status = True
+            customer.hold_until = hold_until
+            db.commit()
+            flash(f"{customer.name} has been put on hold until {hold_until.strftime('%Y-%m-%d')}.", "warning")
+    db.close()
+    return redirect(url_for('manual_hold'))
+
+# Unhold customer
+@app.route('/unhold_customer/<int:customer_id>')
+def unhold_customer(customer_id):
+    db = SessionLocal()
+    customer = db.query(Customer).get(customer_id)
+    if customer:
+        customer.hold_status = False
+        customer.hold_until = None
+        if not customer.activated_on:
+            customer.activated_on = datetime.now()
+        db.commit()
+        flash(f"{customer.name} has been reactivated successfully.", "success")
+    db.close()
+    return redirect(url_for('manual_hold'))
+
+@app.route('/manual_manage_customers')
+def manual_manage_customers():
+    db = SessionLocal()
+    customers = db.query(Customer).all()
+    db.close()
+
+    return render_template(
+        'admin/manual_hold.html',
+        customers=customers,
+        datetime=datetime  # ✅ Pass datetime to template
     )
 
 # ==================== DAILY STATUS CHECK ====================
