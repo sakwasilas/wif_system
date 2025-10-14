@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session, declarative_base
 
-# ✅ New database URL
-DATABASE_URL = "postgresql://wifi_4z1b_user:ttgov76KC9Juh3be3GlDyKGCt3cvCmEI@dpg-d3jmlk9r0fns738cjhe0-a.oregon-postgres.render.com:5432/wifi_4z1b?sslmode=require"
+# ✅ Updated database URL
+DATABASE_URL = "postgresql://wifi_9u5q_user:8R8b5PIa2TIOsNgURwM9x9nmCl9R937H@dpg-d3n0vdhr0fns739jktvg-a.oregon-postgres.render.com:5432/wifi_9u5q?sslmode=require"
 
 # Create SQLAlchemy engine
 engine = create_engine(DATABASE_URL)
