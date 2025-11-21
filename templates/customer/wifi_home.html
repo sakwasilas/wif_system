@@ -15,31 +15,41 @@
             
             <div class="text-center">
                 <h4 class="mb-1">Intersurf Cable Ltd - {{ customer.name }}</h4>
-                <h5 class="mb-2">Your subscription is active</h5>
+                {% if status == 'active' %}
+                    <h5 class="mb-2">Your subscription is active</h5>
+                {% elif status == 'grace' %}
+                    <h5 class="mb-2 text-warning">Subscription in Grace Period</h5>
+                {% elif status == 'suspended' %}
+                    <h5 class="mb-2 text-danger">Subscription Suspended</h5>
+                {% endif %}
                 <hr>
-                <p class="mb-0">Thank you for choosing Intersurf</p>
             </div>
         </div>
 
         <!-- ==================== CARD BODY ==================== -->
         <div class="card-body text-center">
 
-            {# ===== Nearing Expiry ===== #}
-            {% if status == "active" and days_left and days_left <= 3 %}
-                <p class="fw-bold">Your WiFi will expire in {{ days_left }} day{% if days_left > 1 %}s{% endif %}.</p>
-                <p class="fs-5">Please make arrangements to pay before your subscription ends.</p>
-                <form method="GET" action="{{ url_for('wifi_access', ip_address=customer.ip_address) }}">
-                    <input type="hidden" name="paid" value="true">
-                    <button type="submit" class="btn btn-success w-100">Pay Now</button>
-                </form>
+            {# ===== Newly Added / Active Customer ===== #}
+            {% if status == "active" %}
+                <p class="fw-bold">{{ short_message }}</p>
+                {% if detailed_message %}
+                    <p class="fs-5">{{ detailed_message|safe }}</p>
+                {% else %}
+                    <p class="fs-5">Your subscription runs from <strong>{{ customer.start_date.strftime("%Y-%m-%d") }}</strong> 
+                    to <strong>{{ (customer.start_date + timedelta(days=30)).strftime("%Y-%m-%d") }}</strong>.</p>
+                {% endif %}
 
-            {# ===== Active (normal) ===== #}
-            {% elif status == "active" %}
-                {% if short_message %}<p class="fw-bold">{{ short_message }}</p>{% endif %}
-                {% if detailed_message %}<p class="fs-5">{{ detailed_message|safe }}</p>{% endif %}
+                {% if days_left and days_left <= 3 %}
+                    <p class="fw-bold text-warning">Your WiFi will expire in {{ days_left }} day{% if days_left > 1 %}s{% endif %}.</p>
+                    <form method="GET" action="{{ url_for('wifi_access', ip_address=customer.ip_address) }}">
+                        <input type="hidden" name="paid" value="true">
+                        <button type="submit" class="btn btn-success w-100">Pay Now</button>
+                    </form>
+                {% endif %}
 
             {# ===== Grace Period ===== #}
             {% elif status == "grace" %}
+                <p class="fw-bold">{{ short_message }}</p>
                 {% if not customer.grace_days_requested %}
                     <form method="POST" action="{{ url_for('grace_popup', ip_address=customer.ip_address) }}" class="mt-4">
                         <div class="mb-3">
@@ -53,7 +63,6 @@
                         <button type="submit" class="btn btn-warning w-100">Request Grace Period</button>
                     </form>
                 {% endif %}
-
                 <form method="GET" action="{{ url_for('wifi_access', ip_address=customer.ip_address) }}" class="mt-3">
                     <input type="hidden" name="paid" value="true">
                     <button type="submit" class="btn btn-success w-100">Pay Now & Resume WiFi</button>
@@ -61,8 +70,10 @@
 
             {# ===== Suspended ===== #}
             {% elif status == "suspended" %}
-                {% if short_message %}<p class="fw-bold">{{ short_message }}</p>{% endif %}
-                {% if detailed_message %}<p class="fs-5">{{ detailed_message|safe }}</p>{% endif %}
+                <p class="fw-bold">{{ short_message }}</p>
+                {% if detailed_message %}
+                    <p class="fs-5">{{ detailed_message|safe }}</p>
+                {% endif %}
             {% endif %}
 
         </div>

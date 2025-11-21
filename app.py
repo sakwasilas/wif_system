@@ -663,7 +663,6 @@ def wifi_access(ip_address):
         if not customer:
             return "Customer not found", 404
 
-        router = customer.router
         today = datetime.utcnow().date()
         start_date = customer.start_date.date() if customer.start_date else today
         subscription_end = start_date + timedelta(days=30)
@@ -677,7 +676,12 @@ def wifi_access(ip_address):
         if today <= subscription_end:
             customer.status = "active"
             status = "active"
-            short_message = f"Your WiFi is active until {subscription_end}."
+            short_message = (
+                f"Thank you for choosing Intersurf. "
+                f"Your subscription runs from {start_date} to {subscription_end}."
+            )
+
+            # Optional detailed message for near expiry
             if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
                 detailed_message = (
                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
@@ -687,16 +691,11 @@ def wifi_access(ip_address):
                 )
                 customer.pre_expiry_popup_shown = True
 
-            if router and router.ip_address:
-                unblock_ip(customer.ip_address, router)
-
         # ==================== GRACE PERIOD ====================
         elif subscription_end < today <= grace_end:
             customer.status = "grace"
             status = "grace"
             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
-            if router and router.ip_address:
-                unblock_ip(customer.ip_address, router)
 
         # ==================== SUSPENDED ====================
         else:
@@ -711,14 +710,13 @@ def wifi_access(ip_address):
                 f"<strong>+254 790 924185</strong>"
             )
 
-            # 🔒 Block first before rendering
-            if router and router.ip_address:
-                block_ip(customer.ip_address, router)
+            # 🔒 Block only if suspended
+            if customer.router and customer.router.ip_address:
+                block_ip(customer.ip_address, customer.router)
                 print(f"🔒 {customer.name} ({customer.ip_address}) has been blocked.")
 
         db.commit()
 
-        # Render the WiFi home page (popup/status message)
         return render_template(
             "wifi_home.html",
             customer=customer,
@@ -730,6 +728,7 @@ def wifi_access(ip_address):
         )
     finally:
         db.close()
+
 
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
