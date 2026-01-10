@@ -595,6 +595,8 @@ def delete_customer(customer_id):
 
 # ==================== GRACE / WIFI ACCESS ====================
 
+from mikrotik_helper import unblock_ip  # ✅ Import helper
+
 @app.route("/grace_popup/<ip_address>", methods=["GET", "POST"])
 def grace_popup(ip_address):
     if not session.get("user_id"):
@@ -618,22 +620,19 @@ def grace_popup(ip_address):
             customer.grace_days = 1
         grace_end = subscription_end + timedelta(days=customer.grace_days)
 
-        # POST: Customer selects grace days manually
         if request.method == "POST":
             selected_days = request.form.get("grace_days")
             try:
                 selected_days = int(selected_days) if selected_days else 1
-                selected_days = min(selected_days, 5)  # max 5 days
+                selected_days = min(selected_days, 5)
                 customer.grace_days = selected_days
                 customer.popup_shown = True
                 customer.status = "grace"
                 db.commit()
 
+                # ✅ Use helper to unblock IP
                 if router:
-                    try:
-                        unblock_ip(customer.ip_address, router)
-                    except Exception as e:
-                        print(f"IP unblock error on {router.ip_address}: {e}")
+                    unblock_ip(customer.ip_address, router)
 
                 flash(f"Grace period of {selected_days} day(s) activated.", "success")
                 return redirect(url_for("wifi_access", ip_address=ip_address))
@@ -642,7 +641,6 @@ def grace_popup(ip_address):
                 flash(f"Error: {e}", "danger")
                 return redirect(url_for("grace_popup", ip_address=ip_address))
 
-        # GET: Automatic daily grace increment if not yet acknowledged
         if not customer.popup_shown:
             customer.grace_days = min((customer.grace_days or 1) + 1, 5)
             db.commit()
@@ -651,7 +649,10 @@ def grace_popup(ip_address):
     finally:
         db.close()
 
+
 # ==================== WIFI ACCESS ====================
+from mikrotik_helper import block_ip, unblock_ip  # ✅ Import helpers
+
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
     if not session.get("user_id"):
@@ -671,23 +672,18 @@ def wifi_access(ip_address):
         days_left = (subscription_end - today).days if today <= subscription_end else 0
 
         status = short_message = detailed_message = None
+        router = customer.router
 
         # ==================== ACTIVE ====================
         if today <= subscription_end:
             customer.status = "active"
             status = "active"
-            short_message = (
-                f"Thank you for choosing Intersurf. "
-                f"Your subscription runs from {start_date} to {subscription_end}."
-            )
+            short_message = f"Your subscription runs from {start_date} to {subscription_end}."
 
-            # Optional detailed message for near expiry
             if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
                 detailed_message = (
                     f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
-                    f"({days_left} day(s) left).<br>"
-                    "Please make payment to continue using the internet.<br>"
-                    "Forward Mpesa SMS to <strong>+254 790 924185</strong> if already paid."
+                    f"({days_left} day(s) left). Please make payment to continue."
                 )
                 customer.pre_expiry_popup_shown = True
 
@@ -696,23 +692,18 @@ def wifi_access(ip_address):
             customer.status = "grace"
             status = "grace"
             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
+            if router:
+                unblock_ip(customer.ip_address, router)  # ✅ Grace: unblock IP
 
         # ==================== SUSPENDED ====================
         else:
             customer.status = "suspended"
             status = "suspended"
-            short_message = (
-                f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
-            )
-            detailed_message = (
-                f"Hi {customer.name}, your account is suspended.<br>"
-                f"Please contact Intersurf Limited for more information:<br>"
-                f"<strong>+254 790 924185</strong>"
-            )
+            short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
+            detailed_message = f"Hi {customer.name}, your account is suspended. Contact support for help."
 
-            # 🔒 Block only if suspended
-            if customer.router and customer.router.ip_address:
-                block_ip(customer.ip_address, customer.router)
+            if router and router.ip_address:
+                block_ip(customer.ip_address, router)  # ✅ Suspended: block IP
                 print(f"🔒 {customer.name} ({customer.ip_address}) has been blocked.")
 
         db.commit()
@@ -728,7 +719,6 @@ def wifi_access(ip_address):
         )
     finally:
         db.close()
-
 
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
@@ -755,6 +745,8 @@ def suspended_customers():
     return render_template("admin/suspended_customers.html", customers=suspended_list)
 
 # ==================== MARK PAID ====================
+from mikrotik_helper import unblock_ip  # ✅ Import helper
+
 @app.route("/mark_paid/<int:customer_id>", methods=["POST"])
 def mark_paid(customer_id):
     if not session.get("user_id"):
@@ -769,15 +761,15 @@ def mark_paid(customer_id):
         router = customer.router
 
         # Reset subscription
-        customer.start_date = datetime.utcnow()         # Reset start date to now
-        customer.grace_days = 0                          # Clear grace period
-        customer.status = "active"                       # Set status to active
-        customer.popup_shown = False                     # Reset grace popup flag
-        customer.pre_expiry_popup_shown = False          # Reset pre-expiry popup flag
+        customer.start_date = datetime.utcnow()
+        customer.grace_days = 0
+        customer.status = "active"
+        customer.popup_shown = False
+        customer.pre_expiry_popup_shown = False
 
         db.commit()
 
-        # Unblock IP on the assigned router
+        # ✅ Unblock IP using helper
         if router:
             try:
                 unblock_ip(customer.ip_address, router)
@@ -787,9 +779,7 @@ def mark_paid(customer_id):
         else:
             flash(f"{customer.name} is marked paid. No router assigned.", "info")
 
-    # Redirect to list of all customers
     return redirect(url_for("list_customers"))
-'''' New routes to activate diactivate and put customer on hold manually '''
 
 
 
@@ -852,12 +842,7 @@ def export_customers():
 
     )
 
-@app.route("/manual_suspension")
-def manual_suspension():
-    db = SessionLocal()
-    customers = db.query(Customer).all()
-    db.close()
-    return render_template("admin/manually.html", customers=customers)
+from mikrotik_helper import block_ip, unblock_ip  # ✅ Import helpers
 
 @app.route("/toggle_suspend/<int:customer_id>")
 def toggle_suspend(customer_id):
@@ -865,46 +850,51 @@ def toggle_suspend(customer_id):
     customer = db.query(Customer).get(customer_id)
 
     if customer:
+        router = customer.router
         if customer.manually_suspended:
             # Unsuspend manually
             customer.manually_suspended = False
             customer.status = "active"
+            if router:
+                unblock_ip(customer.ip_address, router)  # ✅ Use helper
             flash(f"{customer.name} has been unsuspended manually.", "success")
         else:
             # Suspend manually
             customer.manually_suspended = True
             customer.status = "manually_suspended"
+            if router:
+                block_ip(customer.ip_address, router)  # ✅ Use helper
             flash(f"{customer.name} has been manually suspended.", "warning")
 
         db.commit()
     db.close()
     return redirect(url_for('manual_suspension'))
 
+
 @app.route("/toggle_hold/<int:customer_id>")
 def toggle_hold(customer_id):
     db = SessionLocal()
     customer = db.query(Customer).get(customer_id)
     if customer:
+        router = customer.router
         if customer.hold_status:
             # Unhold (activate)
             customer.hold_status = False
             customer.status = "active"
             customer.activated_on = datetime.now()
+            if router:
+                unblock_ip(customer.ip_address, router)
         else:
             # Put on hold
             customer.hold_status = True
             customer.status = "on_hold"
+            if router:
+                block_ip(customer.ip_address, router)
+
         db.commit()
     db.close()
     return redirect(url_for('manual_suspension'))
 
-@app.route("/manual_hold")
-def manual_hold():
-    db_session = SessionLocal()
-    customers = db_session.query(Customer).all()
-    db_session.close()
-    current_date = datetime.utcnow().strftime("%Y-%m-%d")
-    return render_template("admin/manual_hold.html", customers=customers, current_date=current_date)
 
 # Hold customer with selected date
 @app.route('/hold_customer/<int:customer_id>', methods=['POST'])
@@ -913,14 +903,19 @@ def hold_customer(customer_id):
     customer = db.query(Customer).get(customer_id)
     if customer:
         hold_until_str = request.form.get('hold_until')
+        router = customer.router
         if hold_until_str:
             hold_until = datetime.strptime(hold_until_str, "%Y-%m-%d")
             customer.hold_status = True
             customer.hold_until = hold_until
+            customer.status = "on_hold"
+            if router:
+                block_ip(customer.ip_address, router)
             db.commit()
             flash(f"{customer.name} has been put on hold until {hold_until.strftime('%Y-%m-%d')}.", "warning")
     db.close()
     return redirect(url_for('manual_hold'))
+
 
 # Unhold customer
 @app.route('/unhold_customer/<int:customer_id>')
@@ -932,6 +927,10 @@ def unhold_customer(customer_id):
         customer.hold_until = None
         if not customer.activated_on:
             customer.activated_on = datetime.now()
+        customer.status = "active"
+        router = customer.router
+        if router:
+            unblock_ip(customer.ip_address, router)
         db.commit()
         flash(f"{customer.name} has been reactivated successfully.", "success")
     db.close()
@@ -952,10 +951,7 @@ def manual_manage_customers():
 # ==================== DAILY STATUS CHECK ====================
 
 def daily_status_check(db=None):
-    """
-    Check all customers and update their WiFi status automatically.
-    Blocks/unblocks IPs using helper functions.
-    """
+    """Check all customers and update WiFi status automatically."""
     today = datetime.utcnow().date()
     close_session = False
 
@@ -964,8 +960,7 @@ def daily_status_check(db=None):
         close_session = True
 
     try:
-        customers = db.query(Customer).options(joinedload(Customer.router)).all()
-
+        customers = db.query(Customer).all()
         for customer in customers:
             router = customer.router
             start_date = customer.start_date.date() if customer.start_date else today
@@ -974,45 +969,32 @@ def daily_status_check(db=None):
             grace_end = subscription_end + timedelta(days=grace_days)
             old_status = customer.status
 
-            # ==================== ACTIVE ====================
             if today <= subscription_end:
                 customer.status = "active"
                 if old_status != "active" and router:
                     unblock_ip(customer.ip_address, router)
-                    print(f"✅ Unblocked {customer.name} ({customer.ip_address})")
-
-            # ==================== GRACE ====================
             elif subscription_end < today <= grace_end:
                 customer.status = "grace"
                 if router:
                     unblock_ip(customer.ip_address, router)
-                    print(f"⚠️ Grace period: {customer.name} ({customer.ip_address})")
-
-            # ==================== SUSPENDED ====================
             else:
                 customer.status = "suspended"
                 if old_status != "suspended" and router:
                     block_ip(customer.ip_address, router)
-                    print(f"🔒 Suspended {customer.name} ({customer.ip_address})")
-
         db.commit()
-
     finally:
         if close_session:
             db.close()
 
 
 def run_scheduler(interval_minutes=5):
-    """
-    Run the status check in a separate thread every `interval_minutes`.
-    Default: 5 minutes for near real-time blocking/unblocking.
-    """
+    """Run daily_status_check in the background every interval_minutes."""
     while True:
         daily_status_check()
         time.sleep(interval_minutes * 60)
 
 
-# Start the scheduler in the background
+# Start scheduler safely
 threading.Thread(target=run_scheduler, daemon=True).start()
 
 
