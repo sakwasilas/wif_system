@@ -385,17 +385,22 @@ from flask import jsonify
 @login_required
 @roles_required("admin", "super_admin")
 def get_router_ip(branch_id):
-    db = SessionLocal()
-    try:
-        router = db.query(Router).filter(Router.branch_id == branch_id).first()
-        if router:
-            return jsonify({
-                "id": router.id,
-                "ip_address": router.ip_address
-            })
-        return jsonify({})
-    finally:
-        db.close()
+    """
+    Returns all routers for a given branch as JSON.
+    Format: [{id: router_id, ip_address: 'IP', description: 'desc'}, ...]
+    """
+    with get_db() as db:
+        routers = db.query(Router).filter(Router.branch_id == branch_id).all()
+        router_list = [
+            {
+                "id": r.id,
+                "ip_address": r.ip_address,
+                "description": r.description or ""
+            }
+            for r in routers
+        ]
+        return jsonify(router_list)
+
 
 # ==================== TEST ROUTER CONNECTION ====================
 @app.route("/test_router/<int:router_id>", methods=["GET"])
@@ -435,67 +440,58 @@ def test_router(router_id):
 @roles_required("admin", "super_admin")
 def add_customer():
     with get_db() as db:
-        routers = db.query(Router).all()
         branches = db.query(Branch).all()
+        routers = []
+
+        # ✅ Load routers for first branch by default
+        if branches:
+            routers = db.query(Router).filter(Router.branch_id == branches[0].id).all()
 
         if request.method == "POST":
-            account_no = request.form.get("account_no", "").strip()
-            customer_ip = request.form.get("ip_address", "").strip()
-            billing_amount = request.form.get("billing_amount")
-
-            if not account_no or not customer_ip or not billing_amount:
-                flash("❌ Account number, IP, and billing amount are required.", "danger")
-                return redirect(url_for("add_customer"))
-
-            if db.query(Customer).filter_by(account_no=account_no).first():
-                flash("⚠️ This account number already exists.", "warning")
-                return redirect(url_for("add_customer"))
-
-            if db.query(Customer).filter_by(ip_address=customer_ip).first():
-                flash(f"❌ IP address {customer_ip} is already assigned.", "danger")
-                return redirect(url_for("add_customer"))
+            router_id = request.form.get("router_id")
+            router_id = int(router_id) if router_id else None
 
             customer = Customer(
-                account_no=account_no,
+                account_no=request.form.get("account_no"),
                 name=request.form.get("name"),
                 phone=request.form.get("phone"),
                 email=request.form.get("email"),
                 location=request.form.get("location"),
-                ip_address=customer_ip,
-                billing_amount=float(billing_amount),
-                router_id=request.form.get("router_id"),
-                start_date=request.form.get("start_date") or datetime.utcnow(),
-                contract_date=request.form.get("contract_date") or None,
-                status="active"
+                ip_address=request.form.get("ip_address"),
+                billing_amount=request.form.get("billing_amount"),
+                start_date=request.form.get("start_date"),
+                contract_date=request.form.get("contract_date"),
+                router_id=router_id
             )
+
             db.add(customer)
             db.commit()
 
-            # Optional network info
-            if any(request.form.get(f) for f in [
-                "cable_no","cable_type","splitter","tube_no","core_used",
-                "final_coordinates","loop_no","power_level","coordinates"
-            ]):
-                network = CustomerNetwork(
-                    customer_id=customer.id,
-                    cable_no=request.form.get("cable_no"),
-                    cable_type=request.form.get("cable_type"),
-                    splitter=request.form.get("splitter"),
-                    tube_no=request.form.get("tube_no"),
-                    core_used=request.form.get("core_used"),
-                    final_coordinates=request.form.get("final_coordinates"),
-                    loop_no=request.form.get("loop_no"),
-                    power_level=request.form.get("power_level"),
-                    coordinates=request.form.get("coordinates"),
-                )
-                db.add(network)
-                db.commit()
+            # Network info
+            network = CustomerNetwork(
+                customer_id=customer.id,
+                cable_no=request.form.get("cable_no"),
+                cable_type=request.form.get("cable_type"),
+                splitter=request.form.get("splitter"),
+                tube_no=request.form.get("tube_no"),
+                core_used=request.form.get("core_used"),
+                final_coordinates=request.form.get("final_coordinates"),
+                loop_no=request.form.get("loop_no"),
+                power_level=request.form.get("power_level"),
+                coordinates=request.form.get("coordinates"),
+            )
 
-            flash("✅ Customer added successfully!", "success")
+            db.add(network)
+            db.commit()
+
+            flash("✅ Customer added successfully", "success")
             return redirect(url_for("list_customers"))
 
-    return render_template("admin/add_new_customer.html", routers=routers, branches=branches)
-
+        return render_template(
+            "admin/add_new_customer.html",
+            branches=branches,
+            routers=routers
+        )
 
 # ==================== LIST / EDIT / DELETE CUSTOMERS ====================
 @app.route("/customers")
@@ -549,8 +545,20 @@ def edit_customer(customer_id):
             return redirect(url_for("list_customers"))
 
         branches = db.query(Branch).all()
-        routers = db.query(Router).all()
-        router_ip = customer.router.ip_address if customer.router else None
+
+        # ✅ Get selected branch THROUGH router
+        selected_branch_id = (
+            customer.router.branch.id
+            if customer.router and customer.router.branch
+            else None
+        )
+
+        # ✅ Load routers ONLY for that branch
+        routers = []
+        if selected_branch_id:
+            routers = db.query(Router).filter(
+                Router.branch_id == selected_branch_id
+            ).all()
 
         if request.method == "POST":
             customer.account_no = request.form.get("account_no")
@@ -562,14 +570,14 @@ def edit_customer(customer_id):
             customer.billing_amount = request.form.get("billing_amount")
             customer.start_date = request.form.get("start_date")
             customer.contract_date = request.form.get("contract_date")
-            customer.branch_id = request.form.get("branch_id")
 
-            # Assign router automatically based on branch
-            branch_id = customer.branch_id
-            router = db.query(Router).filter(Router.branch_id == branch_id).first()
-            customer.router_id = router.id if router else None
+            # ❌ DO NOT set customer.branch_id (it does not exist)
 
-            # Update network
+            # ✅ Assign router (router determines branch)
+            selected_router_id = request.form.get("router_id")
+            customer.router_id = int(selected_router_id) if selected_router_id else None
+
+            # Network info
             network = customer.network or CustomerNetwork(customer_id=customer.id)
             network.cable_no = request.form.get("cable_no")
             network.cable_type = request.form.get("cable_type")
@@ -580,21 +588,25 @@ def edit_customer(customer_id):
             network.loop_no = request.form.get("loop_no")
             network.power_level = request.form.get("power_level")
             network.coordinates = request.form.get("coordinates")
+
             customer.network = network
 
             db.add(customer)
             db.commit()
+
             flash("✅ Customer updated successfully!", "success")
             return redirect(url_for("list_customers"))
 
-    return render_template(
-        "admin/edit_customer.html",
-        customer=customer,
-        branches=branches,
-        routers=routers,
-        router_ip=router_ip,
-        network=customer.network
-    )
+        return render_template(
+            "admin/edit_customer.html",
+            customer=customer,
+            branches=branches,
+            routers=routers,
+            selected_branch_id=selected_branch_id,
+            selected_router_id=customer.router_id,
+            network=customer.network
+        )
+
 
 
 @app.route("/delete_customer/<int:customer_id>", methods=["POST"])
@@ -661,7 +673,6 @@ def grace_popup(ip_address):
 
         return render_template("customer/grace_popup.html", customer=customer)
 
-# ==================== WIFI ACCESS ====================
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
     with get_db() as db:
@@ -675,12 +686,14 @@ def wifi_access(ip_address):
         today = datetime.utcnow().date()
         start_date = customer.start_date.date() if customer.start_date else today
         subscription_end = start_date + timedelta(days=30)
-        grace_days = customer.grace_days or 1
+        grace_days = customer.grace_days or 0
         grace_end = subscription_end + timedelta(days=grace_days)
-        days_left = (subscription_end - today).days if today <= subscription_end else 0
+        days_used = (today - start_date).days + 1
+        days_left = max((subscription_end - today).days, 0)
 
         status = short_message = detailed_message = None
         router = customer.router
+        show_popup = False  # New: controls popup display
 
         # ==================== ACTIVE ====================
         if today <= subscription_end:
@@ -688,12 +701,14 @@ def wifi_access(ip_address):
             status = "active"
             short_message = f"Your subscription runs from {start_date} to {subscription_end}."
 
-            if 1 <= days_left <= 4 and not customer.pre_expiry_popup_shown:
+            # ✅ Daily notifications from day 25–30
+            if 25 <= days_used <= 30:
+                show_popup = True
                 detailed_message = (
-                    f"Hi {customer.name}, your subscription expires on <strong>{subscription_end}</strong> "
-                    f"({days_left} day(s) left). Please make payment to continue."
+                    f"Hi {customer.name}, your subscription will expire on "
+                    f"<strong>{subscription_end}</strong> ({days_left} day(s) left). "
+                    f"Please make payment to continue uninterrupted service."
                 )
-                customer.pre_expiry_popup_shown = True
 
         # ==================== GRACE PERIOD ====================
         elif subscription_end < today <= grace_end:
@@ -701,7 +716,7 @@ def wifi_access(ip_address):
             status = "grace"
             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
             if router:
-                unblock_ip(customer.ip_address, router)  # ✅ Grace: unblock IP
+                unblock_ip(customer.ip_address, router)  # Grace: unblock IP
 
         # ==================== SUSPENDED ====================
         else:
@@ -710,7 +725,7 @@ def wifi_access(ip_address):
             short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
             detailed_message = f"Hi {customer.name}, your account is suspended. Contact support for help."
             if router and router.ip_address:
-                block_ip(customer.ip_address, router)  # ✅ Suspended: block IP
+                block_ip(customer.ip_address, router)  # Suspend: block IP
                 print(f"🔒 {customer.name} ({customer.ip_address}) has been blocked.")
 
         db.commit()
@@ -721,10 +736,10 @@ def wifi_access(ip_address):
             status=status,
             short_message=short_message,
             detailed_message=detailed_message,
-            days_left=days_left,
+            days_left=days_left if show_popup else None,
+            show_popup=show_popup,  # New
             current_year=datetime.utcnow().year
         )
-
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
 @app.route("/grace_customers")

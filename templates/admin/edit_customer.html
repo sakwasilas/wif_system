@@ -8,7 +8,6 @@
 
   <h3 class="mb-4 text-center">✏️ Edit Customer Details</h3>
 
-  <!-- Flash messages -->
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
@@ -23,6 +22,7 @@
   <form method="POST" class="card shadow-sm p-4">
     <h5 class="text-primary mb-3">Customer Information</h5>
     <div class="row">
+      <!-- Basic Details -->
       <div class="col-md-6 mb-3">
         <label class="form-label">Account No</label>
         <input type="text" name="account_no" class="form-control" value="{{ customer.account_no or '' }}" required>
@@ -52,30 +52,40 @@
         <input type="text" name="ip_address" class="form-control" value="{{ customer.ip_address or '' }}" required>
       </div>
 
-      <!-- Branch and Router IP -->
+      <!-- Branch & Router -->
       <div class="col-md-6 mb-3">
         <label class="form-label">Branch</label>
-        <select name="branch_id" class="form-select" onchange="reloadBranch(this)">
+        <select name="branch_id" id="branchSelect" class="form-select" onchange="updateRouters()">
           <option value="">-- Select Branch --</option>
           {% for branch in branches %}
-          <option value="{{ branch.id }}" {% if customer.router and customer.router.branch_id == branch.id %}selected{% endif %}>{{ branch.name }}</option>
+            <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>
+              {{ branch.name }}
+            </option>
           {% endfor %}
         </select>
       </div>
       <div class="col-md-6 mb-3">
-        <label class="form-label">Router IP (Auto-Filled)</label>
-        <input type="text" name="router_ip" class="form-control" value="{{ router_ip or '' }}" readonly>
+        <label class="form-label">Router</label>
+        <select name="router_id" id="routerSelect" class="form-select" required>
+          <option value="">-- Select Router --</option>
+          {% for router in routers %}
+            {% if router.branch_id == selected_branch_id %}
+              <option value="{{ router.id }}" {% if router.id == selected_router_id %}selected{% endif %}>
+                {{ router.ip_address }} - {{ router.description or '' }}
+              </option>
+            {% endif %}
+          {% endfor %}
+        </select>
       </div>
 
+      <!-- Dates -->
       <div class="col-md-6 mb-3">
         <label class="form-label">Start Date</label>
-        <input type="date" name="start_date" class="form-control"
-          value="{{ customer.start_date.strftime('%Y-%m-%d') if customer.start_date else '' }}">
+        <input type="date" name="start_date" class="form-control" value="{{ customer.start_date.strftime('%Y-%m-%d') if customer.start_date else '' }}">
       </div>
       <div class="col-md-6 mb-3">
         <label class="form-label">Contract Date</label>
-        <input type="date" name="contract_date" class="form-control"
-          value="{{ customer.contract_date.strftime('%Y-%m-%d') if customer.contract_date else '' }}">
+        <input type="date" name="contract_date" class="form-control" value="{{ customer.contract_date.strftime('%Y-%m-%d') if customer.contract_date else '' }}">
       </div>
     </div>
 
@@ -129,11 +139,24 @@
 </div>
 
 <script>
-function reloadBranch(selectElement) {
-    const branchId = selectElement.value;
-    if (branchId) {
-        window.location.href = window.location.pathname + '?branch_id=' + branchId;
-    }
+function updateRouters() {
+    const branchId = document.getElementById('branchSelect').value;
+    const routerSelect = document.getElementById('routerSelect');
+
+    routerSelect.innerHTML = '<option value="">-- Select Router --</option>';
+    if (!branchId) return;
+
+    fetch(`/get_router_ip/${branchId}`)
+      .then(response => response.json())
+      .then(data => {
+          data.forEach(router => {
+              const opt = document.createElement('option');
+              opt.value = router.id;
+              opt.textContent = `${router.ip_address} - ${router.description || ''}`;
+              routerSelect.appendChild(opt);
+          });
+      })
+      .catch(err => console.error("Error fetching routers:", err));
 }
 </script>
 

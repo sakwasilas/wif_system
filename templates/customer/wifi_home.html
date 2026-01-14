@@ -12,7 +12,7 @@
             {% elif status == 'suspended' %}bg-danger
             {% else %}bg-secondary
             {% endif %}">
-            
+
             <div class="text-center">
                 <h4 class="mb-1">Intersurf Cable Ltd - {{ customer.name }}</h4>
                 {% if status == 'active' %}
@@ -29,7 +29,6 @@
         <!-- ==================== CARD BODY ==================== -->
         <div class="card-body text-center">
 
-            {# ===== Newly Added / Active Customer ===== #}
             {% if status == "active" %}
                 <p class="fw-bold">{{ short_message }}</p>
                 {% if detailed_message %}
@@ -39,15 +38,16 @@
                     to <strong>{{ (customer.start_date + timedelta(days=30)).strftime("%Y-%m-%d") }}</strong>.</p>
                 {% endif %}
 
-                {% if days_left and days_left <= 3 %}
-                    <p class="fw-bold text-warning">Your WiFi will expire in {{ days_left }} day{% if days_left > 1 %}s{% endif %}.</p>
-                    <form method="GET" action="{{ url_for('wifi_access', ip_address=customer.ip_address) }}">
-                        <input type="hidden" name="paid" value="true">
-                        <button type="submit" class="btn btn-success w-100">Pay Now</button>
-                    </form>
+                {% if days_left and days_left <= 6 %}
+                    <!-- Popup for subscription reminder -->
+                    <div id="subscription-popup" class="popup-container">
+                        <h3>Hello {{ customer.name }}!</h3>
+                        <p>Your subscription will expire in <strong>{{ days_left }}</strong> day{% if days_left > 1 %}s{% endif %}.</p>
+                        <p>Please make payment to continue uninterrupted service.</p>
+                        <a href="{{ url_for('wifi_access', ip_address=customer.ip_address) }}" class="btn btn-primary">OK</a>
+                    </div>
                 {% endif %}
 
-            {# ===== Grace Period ===== #}
             {% elif status == "grace" %}
                 <p class="fw-bold">{{ short_message }}</p>
                 {% if not customer.grace_days_requested %}
@@ -68,7 +68,6 @@
                     <button type="submit" class="btn btn-success w-100">Pay Now & Resume WiFi</button>
                 </form>
 
-            {# ===== Suspended ===== #}
             {% elif status == "suspended" %}
                 <p class="fw-bold">{{ short_message }}</p>
                 {% if detailed_message %}
@@ -85,4 +84,38 @@
 
     </div>
 </div>
+
+<!-- ==================== POPUP STYLE & SCRIPT ==================== -->
+<style>
+.popup-container {
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    padding: 25px;
+    text-align: center;
+    z-index: 9999;
+    animation: fadeIn 0.5s;
+}
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(-20px);}
+    to { opacity: 1; transform: translateX(-50%) translateY(0);}
+}
+</style>
+
+<script>
+// Automatically hide popup after 8 seconds
+window.addEventListener('DOMContentLoaded', () => {
+    const popup = document.getElementById('subscription-popup');
+    if (popup) {
+        setTimeout(() => {
+            popup.style.display = 'none';
+        }, 8000); // 8 seconds
+    }
+});
+</script>
+
 {% endblock %}
