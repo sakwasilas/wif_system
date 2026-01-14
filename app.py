@@ -27,6 +27,8 @@ app.secret_key = "123456123456silas123456"
 # ==================== LOGIN / LOGOUT ====================
 from functools import wraps
 #======          ==============   =====================
+from flask_apscheduler import APScheduler
+#=================run app sheduler======================
 
 #===========login decorator==========================
 def login_required(f):
@@ -53,6 +55,16 @@ def roles_required(*roles):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+#================get db context manager=========================
+from contextlib import contextmanager
+
+@contextmanager
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 @app.route('/')
@@ -64,11 +76,11 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        db = SessionLocal()
-        try:
+
+        with get_db() as db:
             user = db.query(User).filter_by(username=username).first()
 
-            # ======= SUPER ADMIN =======
+            # Super admin hardcoded
             if username == "admin" and password == "admin123":
                 session['user_id'] = "super_admin"
                 session['username'] = "admin"
@@ -76,7 +88,7 @@ def login():
                 flash("Welcome Super Admin", "success")
                 return redirect(url_for("admin_dashboard"))
 
-            # ======= NORMAL USERS =======
+            # Regular admin
             if user and check_password_hash(user.password, password):
                 if user.role != "super_admin" and not user.is_active:
                     flash("Your account is pending approval. Please contact the admin.", "warning")
@@ -93,19 +105,16 @@ def login():
                 flash("Welcome", "success")
                 return redirect(url_for("admin_dashboard"))
 
-            # ======= INVALID LOGIN =======
             flash("Invalid username or password", "danger")
-        finally:
-            db.close()
 
     return render_template("login.html")
+
 
 @app.route("/logout")
 def logout():
     session.clear()
     flash("Logged out successfully", "info")
     return redirect(url_for("login"))
-    
 
 # ==================== ADMIN DASHBOARD ====================
 @app.route("/admin_dashboard")
@@ -226,56 +235,55 @@ def register():
 @login_required
 @roles_required("admin", "super_admin")
 def add_branch():
-    db = SessionLocal()
-    if request.method == "POST":
-        name = request.form.get("name").strip()
-        if db.query(Branch).filter_by(name=name).first():
-            flash("Branch already exists!", "danger")
+    with get_db() as db:
+        if request.method == "POST":
+            name = request.form.get("name", "").strip()
+            if db.query(Branch).filter_by(name=name).first():
+                flash("Branch already exists!", "danger")
+                return redirect(url_for("add_branch"))
+            
+            db.add(Branch(name=name))
+            db.commit()
+            flash("Branch added successfully!", "success")
             return redirect(url_for("add_branch"))
-        db.add(Branch(name=name))
-        db.commit()
-        flash("Branch added successfully!", "success")
-        return redirect(url_for("add_branch"))
-    return render_template("admin/add_branch.html")
+        
+        return render_template("admin/add_branch.html")
+
 
 #==================list/edit/delete branch===================
 @app.route("/list_branches")
 @login_required
 @roles_required("admin", "super_admin")
 def list_branches():
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         branches = db.query(Branch).all()
-    finally:
-        db.close()
     return render_template("admin/list_branches.html", branches=branches)
+
 #---------------------------------------------------------------------------
 @app.route("/edit_branch/<int:branch_id>", methods=["GET", "POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def edit_branch(branch_id):
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         branch = db.query(Branch).filter_by(id=branch_id).first()
         if not branch:
             flash("Branch not found", "danger")
             return redirect(url_for("list_branches"))
 
         if request.method == "POST":
-            branch.name = request.form.get("name").strip()
+            branch.name = request.form.get("name", "").strip()
             db.commit()
             flash("Branch updated successfully", "success")
             return redirect(url_for("list_branches"))
-    finally:
-        db.close()
-    return render_template("admin/edit_branch.html", branch=branch)
+
+        return render_template("admin/edit_branch.html", branch=branch)
+
 #-------------------------------------------------------------------------------------
 @app.route("/delete_branch/<int:branch_id>", methods=["POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def delete_branch(branch_id):
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         branch = db.query(Branch).filter_by(id=branch_id).first()
         if branch:
             db.delete(branch)
@@ -283,93 +291,84 @@ def delete_branch(branch_id):
             flash("Branch deleted successfully", "success")
         else:
             flash("Branch not found", "danger")
-    finally:
-        db.close()
     return redirect(url_for("list_branches"))
-
-
-
+#=======================router management==========================
 @app.route("/add_router", methods=["GET", "POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def add_router():
-    db = SessionLocal()
-    branches = db.query(Branch).all()
-    if request.method == "POST":
-        ip_address = request.form.get("ip_address").strip()
-        description = request.form.get("description").strip()
-        branch_id = request.form.get("branch_id")
-        username = request.form.get("username").strip() or "admin"  # default admin
-        password = request.form.get("password").strip()
-        port = request.form.get("port") or 8728
+    with get_db() as db:
+        branches = db.query(Branch).all()
 
-        # Check for duplicate IP
-        if db.query(Router).filter_by(ip_address=ip_address).first():
-            flash("Router IP already exists!", "danger")
+        if request.method == "POST":
+            ip_address = request.form.get("ip_address", "").strip()
+            description = request.form.get("description", "").strip()
+            branch_id = request.form.get("branch_id")
+            username = request.form.get("username", "").strip() or "admin"
+            password = request.form.get("password", "").strip()
+            port = int(request.form.get("port") or 8728)
+
+            if db.query(Router).filter_by(ip_address=ip_address).first():
+                flash("Router IP already exists!", "danger")
+                return redirect(url_for("add_router"))
+
+            router = Router(
+                ip_address=ip_address,
+                description=description,
+                branch_id=branch_id,
+                username=username,
+                password=password,
+                port=port
+            )
+            db.add(router)
+            db.commit()
+            flash("Router added successfully!", "success")
             return redirect(url_for("add_router"))
 
-        # Save router with credentials
-        router = Router(
-            ip_address=ip_address,
-            description=description,
-            branch_id=branch_id,
-            username=username,
-            password=password,
-            port=int(port)
-        )
-        db.add(router)
-        db.commit()
-        flash("Router added successfully!", "success")
-        return redirect(url_for("add_router"))
+        return render_template("admin/add_router.html", branches=branches)
 
-    return render_template("admin/add_router.html", branches=branches)
 #==================list router===============================
-
 @app.route("/routers")
 @login_required
 @roles_required("admin", "super_admin")
 def list_routers():
-    db = SessionLocal()
-    try:
-        # Eagerly load the branch relationship
+    with get_db() as db:
         routers = db.query(Router).options(joinedload(Router.branch)).all()
-    finally:
-        db.close()
     return render_template("admin/list_routers.html", routers=routers)
+
 # ------------------ EDIT ROUTER ------------------
 @app.route("/edit_router/<int:router_id>", methods=["GET", "POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def edit_router(router_id):
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         router = db.query(Router).filter_by(id=router_id).first()
         branches = db.query(Branch).all()
+
         if not router:
             flash("Router not found", "danger")
             return redirect(url_for("list_routers"))
 
         if request.method == "POST":
-            router.ip_address = request.form.get("ip_address")
-            router.description = request.form.get("description")
+            router.ip_address = request.form.get("ip_address", "").strip()
+            router.description = request.form.get("description", "").strip()
             router.branch_id = request.form.get("branch_id")
-            router.username = request.form.get("username")
-            router.password = request.form.get("password")
+            router.username = request.form.get("username", "").strip()
+            router.password = request.form.get("password", "").strip()
             router.port = int(request.form.get("port") or 8728)
             db.commit()
             flash("Router updated successfully", "success")
             return redirect(url_for("list_routers"))
-    finally:
-        db.close()
-    return render_template("admin/edit_router.html", router=router, branches=branches)
+
+        return render_template("admin/edit_router.html", router=router, branches=branches)
+
 
 # ------------------ DELETE ROUTER ------------------
 @app.route("/delete_router/<int:router_id>", methods=["POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def delete_router(router_id):
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         router = db.query(Router).filter_by(id=router_id).first()
         if router:
             db.delete(router)
@@ -377,8 +376,6 @@ def delete_router(router_id):
             flash("Router deleted successfully", "success")
         else:
             flash("Router not found", "danger")
-    finally:
-        db.close()
     return redirect(url_for("list_routers"))
 
 # ================== FETCH ROUTER IP BY BRANCH ==================
@@ -437,31 +434,19 @@ def test_router(router_id):
 @login_required
 @roles_required("admin", "super_admin")
 def add_customer():
-    
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         routers = db.query(Router).all()
         branches = db.query(Branch).all()
 
         if request.method == "POST":
-            # ==================== REQUIRED FIELDS ====================
             account_no = request.form.get("account_no", "").strip()
             customer_ip = request.form.get("ip_address", "").strip()
             billing_amount = request.form.get("billing_amount")
 
-            if not account_no:
-                flash("❌ Account number is required.", "danger")
+            if not account_no or not customer_ip or not billing_amount:
+                flash("❌ Account number, IP, and billing amount are required.", "danger")
                 return redirect(url_for("add_customer"))
 
-            if not customer_ip:
-                flash("❌ Customer IP address is required.", "danger")
-                return redirect(url_for("add_customer"))
-
-            if not billing_amount:
-                flash("❌ Billing amount is required.", "danger")
-                return redirect(url_for("add_customer"))
-
-            # ==================== DUPLICATE CHECKS ====================
             if db.query(Customer).filter_by(account_no=account_no).first():
                 flash("⚠️ This account number already exists.", "warning")
                 return redirect(url_for("add_customer"))
@@ -470,7 +455,6 @@ def add_customer():
                 flash(f"❌ IP address {customer_ip} is already assigned.", "danger")
                 return redirect(url_for("add_customer"))
 
-            # ==================== CREATE CUSTOMER ====================
             customer = Customer(
                 account_no=account_no,
                 name=request.form.get("name"),
@@ -484,18 +468,14 @@ def add_customer():
                 contract_date=request.form.get("contract_date") or None,
                 status="active"
             )
-
             db.add(customer)
             db.commit()
 
-            # ==================== OPTIONAL NETWORK DETAILS ====================
-            if any(
-                request.form.get(field)
-                for field in [
-                    "cable_no", "cable_type", "splitter", "tube_no", "core_used",
-                    "final_coordinates", "loop_no", "power_level", "coordinates"
-                ]
-            ):
+            # Optional network info
+            if any(request.form.get(f) for f in [
+                "cable_no","cable_type","splitter","tube_no","core_used",
+                "final_coordinates","loop_no","power_level","coordinates"
+            ]):
                 network = CustomerNetwork(
                     customer_id=customer.id,
                     cable_no=request.form.get("cable_no"),
@@ -514,19 +494,7 @@ def add_customer():
             flash("✅ Customer added successfully!", "success")
             return redirect(url_for("list_customers"))
 
-    except Exception as e:
-        db.rollback()
-        flash(f"❌ Error adding customer: {e}", "danger")
-        return redirect(url_for("add_customer"))
-
-    finally:
-        db.close()
-
-    return render_template(
-        "admin/add_new_customer.html",
-        routers=routers,
-        branches=branches
-    )
+    return render_template("admin/add_new_customer.html", routers=routers, branches=branches)
 
 
 # ==================== LIST / EDIT / DELETE CUSTOMERS ====================
@@ -534,28 +502,27 @@ def add_customer():
 @login_required
 @roles_required("admin", "super_admin")
 def list_customers():
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-    db = SessionLocal()
-    try:
-        page = int(request.args.get("page", 1))
-        per_page = 5
-        search_term = request.args.get("search", "").strip()
+    search_term = request.args.get("search", "").strip()
+    page = int(request.args.get("page", 1))
+    per_page = 5
+
+    with get_db() as db:
         query = db.query(Customer).options(
             joinedload(Customer.network),
             joinedload(Customer.router).joinedload(Router.branch)
         )
+
         if search_term:
             query = query.filter(
                 (Customer.account_no.ilike(f"%{search_term}%")) |
                 (Customer.name.ilike(f"%{search_term}%")) |
                 (Customer.ip_address.ilike(f"%{search_term}%"))
             )
+
         total = query.count()
         customers = query.offset((page - 1) * per_page).limit(per_page).all()
         has_next = total > page * per_page
-    finally:
-        db.close()
+
     return render_template(
         "admin/list_customer.html",
         customers=customers,
@@ -566,13 +533,12 @@ def list_customers():
         search_term=search_term
     )
 
+
 @app.route("/edit_customer/<int:customer_id>", methods=["GET", "POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def edit_customer(customer_id):
-    
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         customer = db.query(Customer).options(
             joinedload(Customer.router).joinedload(Router.branch),
             joinedload(Customer.network)
@@ -583,24 +549,10 @@ def edit_customer(customer_id):
             return redirect(url_for("list_customers"))
 
         branches = db.query(Branch).all()
-
-        # ✅ When branch changes, auto-fetch router for that branch
-        branch_id = request.args.get("branch_id")
-        router_ip = None
-        router_id = None
-
-        if branch_id:
-            router = db.query(Router).filter(Router.branch_id == branch_id).first()
-            if router:
-                router_ip = router.ip_address
-                router_id = router.id
-        else:
-            if customer.router:
-                router_ip = customer.router.ip_address
-                router_id = customer.router.id
+        routers = db.query(Router).all()
+        router_ip = customer.router.ip_address if customer.router else None
 
         if request.method == "POST":
-            # ==================== CUSTOMER BASIC DETAILS ====================
             customer.account_no = request.form.get("account_no")
             customer.name = request.form.get("name")
             customer.phone = request.form.get("phone")
@@ -612,69 +564,59 @@ def edit_customer(customer_id):
             customer.contract_date = request.form.get("contract_date")
             customer.branch_id = request.form.get("branch_id")
 
-            # ✅ Assign router automatically
-            customer.router_id = router_id
+            # Assign router automatically based on branch
+            branch_id = customer.branch_id
+            router = db.query(Router).filter(Router.branch_id == branch_id).first()
+            customer.router_id = router.id if router else None
 
-            # ==================== NETWORK DETAILS ====================
-            if customer.network:
-                network = customer.network
-            else:
-                network = CustomerNetwork(customer_id=customer.id)
-                customer.network = network
-
+            # Update network
+            network = customer.network or CustomerNetwork(customer_id=customer.id)
             network.cable_no = request.form.get("cable_no")
-            network.final_coordinates = request.form.get("final_coordinates")
-            network.loop_no = request.form.get("loop_no")
-            network.power_level = request.form.get("power_level")
-            network.coordinates = request.form.get("coordinates")
             network.cable_type = request.form.get("cable_type")
             network.splitter = request.form.get("splitter")
             network.tube_no = request.form.get("tube_no")
             network.core_used = request.form.get("core_used")
+            network.final_coordinates = request.form.get("final_coordinates")
+            network.loop_no = request.form.get("loop_no")
+            network.power_level = request.form.get("power_level")
+            network.coordinates = request.form.get("coordinates")
+            customer.network = network
 
             db.add(customer)
             db.commit()
-
             flash("✅ Customer updated successfully!", "success")
             return redirect(url_for("list_customers"))
-
-    finally:
-        db.close()
 
     return render_template(
         "admin/edit_customer.html",
         customer=customer,
         branches=branches,
+        routers=routers,
         router_ip=router_ip,
         network=customer.network
     )
+
 
 @app.route("/delete_customer/<int:customer_id>", methods=["POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def delete_customer(customer_id):
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         customer = db.query(Customer).filter_by(id=customer_id).first()
         if customer:
             db.delete(customer)
             db.commit()
-            flash("Customer deleted successfully!", "success")
+            flash("✅ Customer deleted successfully!", "success")
         else:
-            flash("Customer not found", "danger")
-    finally:
-        db.close()
+            flash("❌ Customer not found", "danger")
     return redirect(url_for("list_customers"))
 
 # ==================== GRACE / WIFI ACCESS ====================
-
 @app.route("/grace_popup/<ip_address>", methods=["GET", "POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def grace_popup(ip_address):
-   
-    db = SessionLocal()
-    try:
+    with get_db() as db:
         customer = db.query(Customer).options(
             joinedload(Customer.router).joinedload(Router.branch),
             joinedload(Customer.network)
@@ -701,7 +643,7 @@ def grace_popup(ip_address):
                 customer.status = "grace"
                 db.commit()
 
-                # ✅ Use helper to unblock IP
+                # ✅ Unblock IP if router exists
                 if router:
                     unblock_ip(customer.ip_address, router)
 
@@ -712,23 +654,21 @@ def grace_popup(ip_address):
                 flash(f"Error: {e}", "danger")
                 return redirect(url_for("grace_popup", ip_address=ip_address))
 
+        # Auto-increment grace days if popup not shown
         if not customer.popup_shown:
             customer.grace_days = min((customer.grace_days or 1) + 1, 5)
             db.commit()
 
         return render_template("customer/grace_popup.html", customer=customer)
-    finally:
-        db.close()
-
 
 # ==================== WIFI ACCESS ====================
-
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
-   
-    db = SessionLocal()
-    try:
-        customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(ip_address=ip_address).first()
+    with get_db() as db:
+        customer = db.query(Customer).options(
+            joinedload(Customer.router)
+        ).filter_by(ip_address=ip_address).first()
+
         if not customer:
             return "Customer not found", 404
 
@@ -769,7 +709,6 @@ def wifi_access(ip_address):
             status = "suspended"
             short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
             detailed_message = f"Hi {customer.name}, your account is suspended. Contact support for help."
-
             if router and router.ip_address:
                 block_ip(customer.ip_address, router)  # ✅ Suspended: block IP
                 print(f"🔒 {customer.name} ({customer.ip_address}) has been blocked.")
@@ -785,8 +724,6 @@ def wifi_access(ip_address):
             days_left=days_left,
             current_year=datetime.utcnow().year
         )
-    finally:
-        db.close()
 
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
@@ -817,14 +754,11 @@ def suspended_customers():
     return render_template("admin/suspended_customers.html", customers=suspended_list)
 
 # ==================== MARK PAID ====================
-
-
 @app.route("/mark_paid/<int:customer_id>", methods=["POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def mark_paid(customer_id):
-   
-    with SessionLocal() as db:
+    with get_db() as db:
         customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(id=customer_id).first()
         if not customer:
             flash("Customer not found.", "danger")
@@ -852,8 +786,6 @@ def mark_paid(customer_id):
             flash(f"{customer.name} is marked paid. No router assigned.", "info")
 
     return redirect(url_for("list_customers"))
-
-
 
 
 # ==================== EXPORT TO EXCEL ====================
@@ -918,28 +850,28 @@ def export_customers():
 @login_required
 @roles_required("admin", "super_admin")
 def toggle_suspend(customer_id):
-    db = SessionLocal()
-    customer = db.query(Customer).get(customer_id)
+    with get_db() as db:
+        customer = db.query(Customer).filter_by(id=customer_id).first()
 
-    if customer:
-        router = customer.router
-        if customer.manually_suspended:
-            # Unsuspend manually
-            customer.manually_suspended = False
-            customer.status = "active"
-            if router:
-                unblock_ip(customer.ip_address, router)  # ✅ Use helper
-            flash(f"{customer.name} has been unsuspended manually.", "success")
-        else:
-            # Suspend manually
-            customer.manually_suspended = True
-            customer.status = "manually_suspended"
-            if router:
-                block_ip(customer.ip_address, router)  # ✅ Use helper
-            flash(f"{customer.name} has been manually suspended.", "warning")
+        if customer:
+            router = customer.router
+            if customer.manually_suspended:
+                # Unsuspend manually
+                customer.manually_suspended = False
+                customer.status = "active"
+                if router:
+                    unblock_ip(customer.ip_address, router)  # ✅ Use helper
+                flash(f"{customer.name} has been unsuspended manually.", "success")
+            else:
+                # Suspend manually
+                customer.manually_suspended = True
+                customer.status = "manually_suspended"
+                if router:
+                    block_ip(customer.ip_address, router)  # ✅ Use helper
+                flash(f"{customer.name} has been manually suspended.", "warning")
 
-        db.commit()
-    db.close()
+            db.commit()
+
     return redirect(url_for('manual_suspension'))
 
 
@@ -947,49 +879,51 @@ def toggle_suspend(customer_id):
 @login_required
 @roles_required("admin", "super_admin")
 def toggle_hold(customer_id):
-    db = SessionLocal()
-    customer = db.query(Customer).get(customer_id)
-    if customer:
-        router = customer.router
-        if customer.hold_status:
-            # Unhold (activate)
-            customer.hold_status = False
-            customer.status = "active"
-            customer.activated_on = datetime.now()
-            if router:
-                unblock_ip(customer.ip_address, router)
-        else:
-            # Put on hold
-            customer.hold_status = True
-            customer.status = "on_hold"
-            if router:
-                block_ip(customer.ip_address, router)
+    with get_db() as db:
+        customer = db.query(Customer).filter_by(id=customer_id).first()
 
-        db.commit()
-    db.close()
+        if customer:
+            router = customer.router
+            if customer.hold_status:
+                # Unhold (activate)
+                customer.hold_status = False
+                customer.status = "active"
+                customer.activated_on = datetime.utcnow()
+                if router:
+                    unblock_ip(customer.ip_address, router)
+                flash(f"{customer.name} has been unheld and activated.", "success")
+            else:
+                # Put on hold
+                customer.hold_status = True
+                customer.status = "on_hold"
+                if router:
+                    block_ip(customer.ip_address, router)
+                flash(f"{customer.name} has been put on hold.", "warning")
+
+            db.commit()
+
     return redirect(url_for('manual_suspension'))
-
 
 # Hold customer with selected date
 @app.route('/hold_customer/<int:customer_id>', methods=['POST'])
 @login_required
 @roles_required("admin", "super_admin")
 def hold_customer(customer_id):
-    db = SessionLocal()
-    customer = db.query(Customer).get(customer_id)
-    if customer:
-        hold_until_str = request.form.get('hold_until')
-        router = customer.router
-        if hold_until_str:
+    hold_until_str = request.form.get('hold_until')
+    
+    with get_db() as db:
+        customer = db.query(Customer).filter_by(id=customer_id).first()
+        if customer and hold_until_str:
             hold_until = datetime.strptime(hold_until_str, "%Y-%m-%d")
             customer.hold_status = True
             customer.hold_until = hold_until
             customer.status = "on_hold"
+            router = customer.router
             if router:
                 block_ip(customer.ip_address, router)
             db.commit()
             flash(f"{customer.name} has been put on hold until {hold_until.strftime('%Y-%m-%d')}.", "warning")
-    db.close()
+
     return redirect(url_for('manual_hold'))
 
 
@@ -998,33 +932,30 @@ def hold_customer(customer_id):
 @login_required
 @roles_required("admin", "super_admin")
 def unhold_customer(customer_id):
-    db = SessionLocal()
-    customer = db.query(Customer).get(customer_id)
-    if customer:
-        customer.hold_status = False
-        customer.hold_until = None
-        if not customer.activated_on:
-            customer.activated_on = datetime.now()
-        customer.status = "active"
-        router = customer.router
-        if router:
-            unblock_ip(customer.ip_address, router)
-        db.commit()
-        flash(f"{customer.name} has been reactivated successfully.", "success")
-    db.close()
+    with get_db() as db:
+        customer = db.query(Customer).filter_by(id=customer_id).first()
+        if customer:
+            customer.hold_status = False
+            customer.hold_until = None
+            if not customer.activated_on:
+                customer.activated_on = datetime.utcnow()
+            customer.status = "active"
+            router = customer.router
+            if router:
+                unblock_ip(customer.ip_address, router)
+            db.commit()
+            flash(f"{customer.name} has been reactivated successfully.", "success")
+
     return redirect(url_for('manual_hold'))
+
 
 @app.route('/manual_manage_customers')
 def manual_manage_customers():
-    db = SessionLocal()
-    customers = db.query(Customer).all()
-    db.close()
+    with get_db() as db:
+        customers = db.query(Customer).all()
+    return render_template('admin/manual_hold.html', customers=customers, datetime=datetime)
 
-    return render_template(
-        'admin/manual_hold.html',
-        customers=customers,
-        datetime=datetime  # ✅ Pass datetime to template
-    )
+# ==================== DAILY STATUS CHECK ====================
 
 # ==================== DAILY STATUS CHECK ====================
 
@@ -1075,7 +1006,8 @@ def run_scheduler(interval_minutes=5):
 # Start scheduler safely
 threading.Thread(target=run_scheduler, daemon=True).start()
 
-
 # ==================== RUN APP ====================
+
 if __name__ == "__main__":
+   
     app.run(debug=True, host="0.0.0.0", port=5000)
