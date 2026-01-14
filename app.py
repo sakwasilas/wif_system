@@ -1,13 +1,11 @@
 # ==================== STANDARD LIBRARY ====================
-import threading
-import time
-
+import os
 import io
 from datetime import datetime, timedelta
 
 # ==================== FLASK ====================
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
-
+from flask_apscheduler import APScheduler
 # ==================== MIKROTIK HELPER ====================
 from mikrotik_helper import block_ip, unblock_ip, get_mikrotik_connection
 
@@ -24,10 +22,19 @@ from models import User, Customer, CustomerNetwork, Branch, Router
 # ==================== FLASK APP ====================
 app = Flask(__name__)
 app.secret_key = "123456123456silas123456"
+
+scheduler = APScheduler()
+
+# APScheduler config (safe defaults)
+app.config["SCHEDULER_API_ENABLED"] = False
+app.config["SCHEDULER_TIMEZONE"] = "UTC"
+
+scheduler.init_app(app)
+
 # ==================== LOGIN / LOGOUT ====================
 from functools import wraps
 #======          ==============   =====================
-from flask_apscheduler import APScheduler
+
 #=================run app sheduler======================
 
 #===========login decorator==========================
@@ -965,14 +972,16 @@ def unhold_customer(customer_id):
 
 
 @app.route('/manual_manage_customers')
+@login_required
+@roles_required("admin", "super_admin")
 def manual_manage_customers():
+
     with get_db() as db:
         customers = db.query(Customer).all()
     return render_template('admin/manual_hold.html', customers=customers, datetime=datetime)
 
-# ==================== DAILY STATUS CHECK ====================
-
-# ==================== DAILY STATUS CHECK ====================
+# ==================== APScheduler Job ====================
+from datetime import datetime
 
 def daily_status_check(db=None):
     """Check all customers and update WiFi status automatically."""
@@ -1010,20 +1019,32 @@ def daily_status_check(db=None):
         if close_session:
             db.close()
 
+# ==================== SCHEDULER SETUP ====================
+# For testing: run every 5 minutes
+scheduler.add_job(
+    id="daily_status_check_test",
+    func=daily_status_check,
+    trigger="interval",
+    minutes=5,
+    replace_existing=True
+)
 
-def run_scheduler(interval_minutes=5):
-    """Run daily_status_check in the background every interval_minutes."""
-    while True:
-        daily_status_check()
-        time.sleep(interval_minutes * 60)
+# For production: uncomment this line to run once daily at midnight UTC
+# scheduler.add_job(
+#     id="daily_status_check_daily",
+#     func=daily_status_check,
+#     trigger="cron",
+#     hour=0,
+#     minute=0,
+#     replace_existing=True
+# )
 
-
-# Start scheduler safely
-threading.Thread(target=run_scheduler, daemon=True).start()
 
 # ==================== RUN APP ====================
 
 if __name__ == "__main__":
+ 
+    scheduler.start()
+    print("Scheduler started successfully.")
 
-   
     app.run(debug=True, host="0.0.0.0", port=5000)
