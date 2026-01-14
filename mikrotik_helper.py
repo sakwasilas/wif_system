@@ -89,4 +89,3 @@ def unblock_ip(ip_address, router):
         print(f"⚠️ Error unblocking IP {ip_address} on {router.ip_address}: {e}")
         return False
 
-

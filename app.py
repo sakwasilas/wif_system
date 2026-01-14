@@ -25,6 +25,36 @@ from models import User, Customer, CustomerNetwork, Branch, Router
 app = Flask(__name__)
 app.secret_key = "123456123456silas123456"
 # ==================== LOGIN / LOGOUT ====================
+from functools import wraps
+#======          ==============   =====================
+
+#===========login decorator==========================
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please log in to continue.", "warning")
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+#==================role based decorator===============
+def roles_required(*roles):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not session.get("user_id"):
+                flash("Please log in to continue.", "warning")
+                return redirect(url_for("login"))
+
+            if session.get("role") not in roles:
+                flash("Access denied.", "danger")
+                return redirect(url_for("admin_dashboard"))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
 @app.route('/')
 def home():
     return redirect(url_for('login'))
@@ -373,67 +403,69 @@ def admin_dashboard():
         db.close()
 
 # ==================== CUSTOMER MANAGEMENT ====================
-
 @app.route("/add_customer", methods=["GET", "POST"])
 def add_customer():
     if not session.get("user_id"):
         return redirect(url_for("login"))
+
     db = SessionLocal()
     try:
         routers = db.query(Router).all()
         branches = db.query(Branch).all()
 
         if request.method == "POST":
-            customer_ip = request.form.get("ip_address")
+            # ==================== REQUIRED FIELDS ====================
+            account_no = request.form.get("account_no", "").strip()
+            customer_ip = request.form.get("ip_address", "").strip()
+            billing_amount = request.form.get("billing_amount")
 
-            # ✅ Check if the customer IP already exists
-            existing_customer = db.query(Customer).filter_by(ip_address=customer_ip).first()
-            if existing_customer:
-                flash(f"❌ IP address {customer_ip} is already assigned to another customer.", "danger")
+            if not account_no:
+                flash("❌ Account number is required.", "danger")
                 return redirect(url_for("add_customer"))
 
-            account_no = request.form.get("account_no") or generate_account_no()
+            if not customer_ip:
+                flash("❌ Customer IP address is required.", "danger")
+                return redirect(url_for("add_customer"))
+
+            if not billing_amount:
+                flash("❌ Billing amount is required.", "danger")
+                return redirect(url_for("add_customer"))
+
+            # ==================== DUPLICATE CHECKS ====================
+            if db.query(Customer).filter_by(account_no=account_no).first():
+                flash("⚠️ This account number already exists.", "warning")
+                return redirect(url_for("add_customer"))
+
+            if db.query(Customer).filter_by(ip_address=customer_ip).first():
+                flash(f"❌ IP address {customer_ip} is already assigned.", "danger")
+                return redirect(url_for("add_customer"))
+
+            # ==================== CREATE CUSTOMER ====================
             customer = Customer(
                 account_no=account_no,
                 name=request.form.get("name"),
                 phone=request.form.get("phone"),
                 email=request.form.get("email"),
                 location=request.form.get("location"),
-                ip_address=customer_ip,  # Customer IP (manual)
-                billing_amount=float(request.form.get("billing_amount")),
-                router_id=request.form.get("router_id"),  # Router selected, auto IP shown
+                ip_address=customer_ip,
+                billing_amount=float(billing_amount),
+                router_id=request.form.get("router_id"),
                 start_date=request.form.get("start_date") or datetime.utcnow(),
                 contract_date=request.form.get("contract_date") or None,
+                status="active"
             )
 
-            try:
-                db.add(customer)
-                db.commit()
-            except Exception as e:
-                db.rollback()
+            db.add(customer)
+            db.commit()
 
-                # ✅ Friendly duplicate & general error handling
-                error_msg = str(e)
-                if "duplicate key value violates unique constraint" in error_msg:
-                    if "customers_ip_address_key" in error_msg:
-                        flash("❌ This IP address is already registered to another customer.", "danger")
-                    elif "customers_account_no_key" in error_msg:
-                        flash("⚠️ This account number already exists. Please try again.", "warning")
-                    else:
-                        flash("⚠️ Duplicate entry found. Please check your input.", "warning")
-                else:
-                    flash("❌ An unexpected error occurred while adding the customer.", "danger")
-
-                return redirect(url_for("add_customer"))
-
-            # ✅ Add network details if provided
-            if any([
-                request.form.get(f)
-                for f in [
+            # ==================== OPTIONAL NETWORK DETAILS ====================
+            if any(
+                request.form.get(field)
+                for field in [
                     "cable_no", "cable_type", "splitter", "tube_no", "core_used",
                     "final_coordinates", "loop_no", "power_level", "coordinates"
                 ]
-            ]):
+            ):
                 network = CustomerNetwork(
                     customer_id=customer.id,
                     cable_no=request.form.get("cable_no"),
@@ -452,10 +484,19 @@ def add_customer():
             flash("✅ Customer added successfully!", "success")
             return redirect(url_for("list_customers"))
 
+    except Exception as e:
+        db.rollback()
+        flash(f"❌ Error adding customer: {e}", "danger")
+        return redirect(url_for("add_customer"))
+
     finally:
         db.close()
 
-    return render_template("admin/add_new_customer.html", routers=routers, branches=branches)
+    return render_template(
+        "admin/add_new_customer.html",
+        routers=routers,
+        branches=branches
+    )
 
 
 # ==================== LIST / EDIT / DELETE CUSTOMERS ====================
