@@ -380,9 +380,10 @@ def test_router(router_id):
 
 # ==================== ADMIN DASHBOARD ====================
 @app.route("/admin_dashboard")
+@login_required
+@roles_required("admin", "super_admin")
 def admin_dashboard():
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
+    
     db = SessionLocal()
     try:
         total_users = db.query(Customer).count()
