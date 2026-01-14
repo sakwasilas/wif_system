@@ -68,11 +68,15 @@ def login():
         try:
             user = db.query(User).filter_by(username=username).first()
 
+            # ======= SUPER ADMIN =======
             if username == "admin" and password == "admin123":
-                session.update({"user_id": "super_admin", "username": "admin", "role": "super_admin"})
+                session['user_id'] = "super_admin"
+                session['username'] = "admin"
+                session['role'] = "super_admin"
                 flash("Welcome Super Admin", "success")
                 return redirect(url_for("admin_dashboard"))
 
+            # ======= NORMAL USERS =======
             if user and check_password_hash(user.password, password):
                 if user.role != "super_admin" and not user.is_active:
                     flash("Your account is pending approval. Please contact the admin.", "warning")
@@ -82,13 +86,18 @@ def login():
                     flash("Access denied. You are not an admin.", "danger")
                     return redirect(url_for("login"))
 
-                session.update({"user_id": user.id, "username": user.username, "role": user.role})
+                # Explicit session assignments
+                session['user_id'] = user.id
+                session['username'] = user.username
+                session['role'] = user.role
                 flash("Welcome", "success")
                 return redirect(url_for("admin_dashboard"))
 
+            # ======= INVALID LOGIN =======
             flash("Invalid username or password", "danger")
         finally:
             db.close()
+
     return render_template("login.html")
 
 @app.route("/logout")
@@ -96,9 +105,37 @@ def logout():
     session.clear()
     flash("Logged out successfully", "info")
     return redirect(url_for("login"))
+    
+
+# ==================== ADMIN DASHBOARD ====================
+@app.route("/admin_dashboard")
+@login_required
+@roles_required("admin", "super_admin")
+def admin_dashboard():
+    
+    db = SessionLocal()
+    try:
+        total_users = db.query(Customer).count()
+        active_users = db.query(Customer).filter_by(status="active").count()
+        grace_users = db.query(Customer).filter_by(status="grace").count()
+        suspended_users = db.query(Customer).filter_by(status="suspended").count()
+        return render_template(
+            "admin/admin_dashboard.html",
+            username=session.get("username"),
+            role=session.get("role"),
+            total_users=total_users,
+            active_users=active_users,
+            grace_users=grace_users,
+            suspended_users=suspended_users,
+            datetime=datetime
+        )
+    finally:
+        db.close()
 
 # ==================== USER MANAGEMENT ====================
 @app.route("/manage_users")
+@login_required
+@roles_required("admin", "super_admin")
 def manage_users():
     if not session.get("user_id"):
         return redirect(url_for("login"))
@@ -110,10 +147,10 @@ def manage_users():
     return render_template("admin/manage_user.html", users=users)
 
 @app.route("/pending_users")
+@login_required
+@roles_required("admin", "super_admin")
 def pending_users():
-    if session.get("role") != "super_admin":
-        flash("Access denied. Only super admin can view pending users.", "danger")
-        return redirect(url_for("admin_dashboard"))
+
     db = SessionLocal()
     try:
         users = db.query(User).filter_by(is_active=False, role="admin").all()
@@ -122,6 +159,8 @@ def pending_users():
     return render_template("admin/pending_users.html", users=users)
 
 @app.route("/delete_user/<int:user_id>", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def delete_user(user_id):
     db = SessionLocal()
     user = db.query(User).filter_by(id=user_id).first()
@@ -134,9 +173,10 @@ def delete_user(user_id):
     return redirect(url_for("pending_users"))
 
 @app.route("/toggle_user/<int:user_id>", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def toggle_user(user_id):
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
+    
     db = SessionLocal()
     try:
         user = db.query(User).filter_by(id=user_id).first()
@@ -151,6 +191,7 @@ def toggle_user(user_id):
     return redirect(url_for("manage_users"))
 
 @app.route("/register", methods=["GET", "POST"])
+
 def register():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
@@ -182,6 +223,8 @@ def register():
 
 # ==================== BRANCH AND ROUTER MANAGEMENT ====================
 @app.route("/add_branch", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def add_branch():
     db = SessionLocal()
     if request.method == "POST":
@@ -197,6 +240,8 @@ def add_branch():
 
 #==================list/edit/delete branch===================
 @app.route("/list_branches")
+@login_required
+@roles_required("admin", "super_admin")
 def list_branches():
     db = SessionLocal()
     try:
@@ -206,6 +251,8 @@ def list_branches():
     return render_template("admin/list_branches.html", branches=branches)
 #---------------------------------------------------------------------------
 @app.route("/edit_branch/<int:branch_id>", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def edit_branch(branch_id):
     db = SessionLocal()
     try:
@@ -224,6 +271,8 @@ def edit_branch(branch_id):
     return render_template("admin/edit_branch.html", branch=branch)
 #-------------------------------------------------------------------------------------
 @app.route("/delete_branch/<int:branch_id>", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def delete_branch(branch_id):
     db = SessionLocal()
     try:
@@ -241,6 +290,8 @@ def delete_branch(branch_id):
 
 
 @app.route("/add_router", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def add_router():
     db = SessionLocal()
     branches = db.query(Branch).all()
@@ -273,9 +324,10 @@ def add_router():
 
     return render_template("admin/add_router.html", branches=branches)
 #==================list router===============================
-from sqlalchemy.orm import joinedload
 
 @app.route("/routers")
+@login_required
+@roles_required("admin", "super_admin")
 def list_routers():
     db = SessionLocal()
     try:
@@ -286,6 +338,8 @@ def list_routers():
     return render_template("admin/list_routers.html", routers=routers)
 # ------------------ EDIT ROUTER ------------------
 @app.route("/edit_router/<int:router_id>", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def edit_router(router_id):
     db = SessionLocal()
     try:
@@ -311,6 +365,8 @@ def edit_router(router_id):
 
 # ------------------ DELETE ROUTER ------------------
 @app.route("/delete_router/<int:router_id>", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def delete_router(router_id):
     db = SessionLocal()
     try:
@@ -329,6 +385,8 @@ def delete_router(router_id):
 from flask import jsonify
 
 @app.route("/get_router_ip/<int:branch_id>")
+@login_required
+@roles_required("admin", "super_admin")
 def get_router_ip(branch_id):
     db = SessionLocal()
     try:
@@ -344,11 +402,10 @@ def get_router_ip(branch_id):
 
 # ==================== TEST ROUTER CONNECTION ====================
 @app.route("/test_router/<int:router_id>", methods=["GET"])
+@login_required
+@roles_required("admin", "super_admin")
 def test_router(router_id):
     """Test if a router connection works and basic commands run."""
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-
     db = SessionLocal()
     try:
         router = db.query(Router).filter_by(id=router_id).first()
@@ -375,40 +432,12 @@ def test_router(router_id):
 
     return redirect(url_for("list_routers"))
 
-
-
-
-# ==================== ADMIN DASHBOARD ====================
-@app.route("/admin_dashboard")
-@login_required
-@roles_required("admin", "super_admin")
-def admin_dashboard():
-    
-    db = SessionLocal()
-    try:
-        total_users = db.query(Customer).count()
-        active_users = db.query(Customer).filter_by(status="active").count()
-        grace_users = db.query(Customer).filter_by(status="grace").count()
-        suspended_users = db.query(Customer).filter_by(status="suspended").count()
-        return render_template(
-            "admin/admin_dashboard.html",
-            username=session.get("username"),
-            role=session.get("role"),
-            total_users=total_users,
-            active_users=active_users,
-            grace_users=grace_users,
-            suspended_users=suspended_users,
-            datetime=datetime
-        )
-    finally:
-        db.close()
-
 # ==================== CUSTOMER MANAGEMENT ====================
 @app.route("/add_customer", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def add_customer():
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-
+    
     db = SessionLocal()
     try:
         routers = db.query(Router).all()
@@ -502,6 +531,8 @@ def add_customer():
 
 # ==================== LIST / EDIT / DELETE CUSTOMERS ====================
 @app.route("/customers")
+@login_required
+@roles_required("admin", "super_admin")
 def list_customers():
     if not session.get("user_id"):
         return redirect(url_for("login"))
@@ -536,10 +567,10 @@ def list_customers():
     )
 
 @app.route("/edit_customer/<int:customer_id>", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def edit_customer(customer_id):
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-
+    
     db = SessionLocal()
     try:
         customer = db.query(Customer).options(
@@ -619,9 +650,9 @@ def edit_customer(customer_id):
     )
 
 @app.route("/delete_customer/<int:customer_id>", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def delete_customer(customer_id):
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
     db = SessionLocal()
     try:
         customer = db.query(Customer).filter_by(id=customer_id).first()
@@ -637,13 +668,11 @@ def delete_customer(customer_id):
 
 # ==================== GRACE / WIFI ACCESS ====================
 
-from mikrotik_helper import unblock_ip  # ✅ Import helper
-
 @app.route("/grace_popup/<ip_address>", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def grace_popup(ip_address):
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-
+   
     db = SessionLocal()
     try:
         customer = db.query(Customer).options(
@@ -693,13 +722,10 @@ def grace_popup(ip_address):
 
 
 # ==================== WIFI ACCESS ====================
-from mikrotik_helper import block_ip, unblock_ip  # ✅ Import helpers
 
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-
+   
     db = SessionLocal()
     try:
         customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(ip_address=ip_address).first()
@@ -765,6 +791,8 @@ def wifi_access(ip_address):
 
 # ==================== GRACE / SUSPENDED CUSTOMERS ====================
 @app.route("/grace_customers")
+@login_required
+@roles_required("admin", "super_admin")
 def grace_customers():
     if not session.get("user_id"):
         return redirect(url_for("login"))
@@ -776,6 +804,8 @@ def grace_customers():
     return render_template("admin/grace_customers.html", customers=grace_list)
 
 @app.route("/suspended_customers")
+@login_required
+@roles_required("admin", "super_admin")
 def suspended_customers():
     if not session.get("user_id"):
         return redirect(url_for("login"))
@@ -787,13 +817,13 @@ def suspended_customers():
     return render_template("admin/suspended_customers.html", customers=suspended_list)
 
 # ==================== MARK PAID ====================
-from mikrotik_helper import unblock_ip  # ✅ Import helper
+
 
 @app.route("/mark_paid/<int:customer_id>", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
 def mark_paid(customer_id):
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-
+   
     with SessionLocal() as db:
         customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(id=customer_id).first()
         if not customer:
@@ -828,10 +858,10 @@ def mark_paid(customer_id):
 
 # ==================== EXPORT TO EXCEL ====================
 @app.route("/customers/export", methods=["GET"])
+@login_required
+@roles_required("admin", "super_admin")
 def export_customers():
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-
+    
     search_term = request.args.get("search", "").strip()
     db = SessionLocal()
     try:
@@ -884,9 +914,9 @@ def export_customers():
 
     )
 
-from mikrotik_helper import block_ip, unblock_ip  # ✅ Import helpers
-
 @app.route("/toggle_suspend/<int:customer_id>")
+@login_required
+@roles_required("admin", "super_admin")
 def toggle_suspend(customer_id):
     db = SessionLocal()
     customer = db.query(Customer).get(customer_id)
@@ -914,6 +944,8 @@ def toggle_suspend(customer_id):
 
 
 @app.route("/toggle_hold/<int:customer_id>")
+@login_required
+@roles_required("admin", "super_admin")
 def toggle_hold(customer_id):
     db = SessionLocal()
     customer = db.query(Customer).get(customer_id)
@@ -940,6 +972,8 @@ def toggle_hold(customer_id):
 
 # Hold customer with selected date
 @app.route('/hold_customer/<int:customer_id>', methods=['POST'])
+@login_required
+@roles_required("admin", "super_admin")
 def hold_customer(customer_id):
     db = SessionLocal()
     customer = db.query(Customer).get(customer_id)
@@ -961,6 +995,8 @@ def hold_customer(customer_id):
 
 # Unhold customer
 @app.route('/unhold_customer/<int:customer_id>')
+@login_required
+@roles_required("admin", "super_admin")
 def unhold_customer(customer_id):
     db = SessionLocal()
     customer = db.query(Customer).get(customer_id)
