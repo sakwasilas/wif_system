@@ -1,15 +1,14 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session, declarative_base
 
-# ✅ Updated database URL with SSL
-path="mysql+pymysql://root:2480@localhost/wifi"
+# Use the dedicated database user
+DATABASE_URL = "mysql+pymysql://wifuser:Duka.2480@localhost/wifi"
 
-# Create SQLAlchemy engine
-engine= create_engine(path)
+# Create engine
+engine = create_engine(DATABASE_URL, echo=False)  # echo=True for debug
 
 # Create session factory
-Session = scoped_session(sessionmaker(bind=engine))
-SessionLocal = Session
+SessionLocal = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
 
-# Declare base class for models
+# Base class for ORM models
 Base = declarative_base()

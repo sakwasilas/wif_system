@@ -1044,7 +1044,9 @@ scheduler.add_job(
 
 if __name__ == "__main__":
  
+    if not scheduler.running:
     scheduler.start()
+
     print("Scheduler started successfully.")
 
     app.run(debug=True, host="0.0.0.0", port=5000)
