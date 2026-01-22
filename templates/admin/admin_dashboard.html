@@ -81,13 +81,15 @@
             <div class="col-md-3">
                 <div class="sidebar shadow-sm">
 
+                    <!-- Branch and Router -->
+                    <a href="{{ url_for('add_branch') }}" class="btn btn-info btn-sm w-100 mb-2">🏢 Add Branch</a>
+                    <a href="{{ url_for('add_router') }}" class="btn btn-secondary btn-sm w-100 mb-3">🖧 Add Router</a>
+
                     <!-- Quick Actions -->
                     <a href="{{ url_for('add_customer') }}" class="btn btn-success btn-sm w-75 mb-2">➕ Add Customer</a>
                     <a href="{{ url_for('list_customers') }}" class="btn btn-primary btn-sm w-75 mb-2">📋 View Customers</a>
 
-                    <!-- Branch and Router -->
-                    <a href="{{ url_for('add_branch') }}" class="btn btn-info btn-sm w-100 mb-2">🏢 Add Branch</a>
-                    <a href="{{ url_for('add_router') }}" class="btn btn-secondary btn-sm w-100 mb-3">🖧 Add Router</a>
+                    
 
                     <!-- User Management (Super Admin only) -->
                     <hr>
