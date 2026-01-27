@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session, declarative_base
 
 # Use the dedicated database user
-DATABASE_URL = "mysql+pymysql://wifuser:Duka.2480@localhost/wifi"
+DATABASE_URL = "mysql+pymysql://root:2480@localhost/wifi"
 
 # Create engine
 engine = create_engine(DATABASE_URL, echo=False)  # echo=True for debug

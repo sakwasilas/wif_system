@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container-fluid">
+
+    <div class="d-flex gap-2 mb-3">
+        <a href="{{ url_for('list_branches') }}" class="btn btn-outline-secondary">
+            ⬅ Back to Branches
+        </a>
+
+        <a href="{{ url_for('export_customers_by_branch', branch_id=branch.id) }}"
+           class="btn btn-dark">
+           ⬇ Export {{ branch.name }} Customers
+        </a>
+    </div>
+
+    <h3 class="mb-3">
+        Customers under branch: <strong>{{ branch.name }}</strong>
+    </h3>
+
+    {% include "admin/_customer_table.html" %}
+
+</div>
+
+{% endblock %}

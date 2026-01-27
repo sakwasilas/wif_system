@@ -2,6 +2,7 @@
 import os
 import io
 from datetime import datetime, timedelta
+import pandas as pd
 
 # ==================== FLASK ====================
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
@@ -128,13 +129,18 @@ def logout():
 @login_required
 @roles_required("admin", "super_admin")
 def admin_dashboard():
-    
     db = SessionLocal()
     try:
+        # Customer stats
         total_users = db.query(Customer).count()
         active_users = db.query(Customer).filter_by(status="active").count()
         grace_users = db.query(Customer).filter_by(status="grace").count()
         suspended_users = db.query(Customer).filter_by(status="suspended").count()
+
+        # Get all branches and routers for dropdowns
+        branches = db.query(Branch).all()
+        routers = db.query(Router).all()
+
         return render_template(
             "admin/admin_dashboard.html",
             username=session.get("username"),
@@ -143,10 +149,13 @@ def admin_dashboard():
             active_users=active_users,
             grace_users=grace_users,
             suspended_users=suspended_users,
+            branches=branches,
+            routers=routers,
             datetime=datetime
         )
     finally:
         db.close()
+
 
 # ==================== USER MANAGEMENT ====================
 @app.route("/manage_users")
@@ -237,34 +246,33 @@ def register():
             db.close()
     return render_template("register.html")
 
-# ==================== BRANCH AND ROUTER MANAGEMENT ====================
+# ==================== ADD BRANCH ====================
 @app.route("/add_branch", methods=["GET", "POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def add_branch():
     with get_db() as db:
         if request.method == "POST":
-            name = request.form.get("name", "").strip()
-            if db.query(Branch).filter_by(name=name).first():
-                flash("Branch already exists!", "danger")
+            branch_name = request.form.get("name", "").strip()
+            if not branch_name:
+                flash("Branch name cannot be empty", "warning")
                 return redirect(url_for("add_branch"))
-            
-            db.add(Branch(name=name))
+
+            # Check for duplicate
+            existing = db.query(Branch).filter_by(name=branch_name).first()
+            if existing:
+                flash("Branch already exists", "danger")
+                return redirect(url_for("add_branch"))
+
+            new_branch = Branch(name=branch_name)
+            db.add(new_branch)
             db.commit()
-            flash("Branch added successfully!", "success")
-            return redirect(url_for("add_branch"))
-        
+            flash(f"Branch '{branch_name}' added successfully!", "success")
+            return redirect(url_for("list_branches"))
+
         return render_template("admin/add_branch.html")
 
 
-#==================list/edit/delete branch===================
-@app.route("/list_branches")
-@login_required
-@roles_required("admin", "super_admin")
-def list_branches():
-    with get_db() as db:
-        branches = db.query(Branch).all()
-    return render_template("admin/list_branches.html", branches=branches)
 
 #---------------------------------------------------------------------------
 @app.route("/edit_branch/<int:branch_id>", methods=["GET", "POST"])
@@ -299,6 +307,18 @@ def delete_branch(branch_id):
         else:
             flash("Branch not found", "danger")
     return redirect(url_for("list_branches"))
+
+@app.route('/branches')
+@login_required
+def list_branches():
+    # Use a session to query the database
+    with get_db() as db:  # assuming get_db() returns a SQLAlchemy session
+        branches = db.query(Branch).all()
+    return render_template('admin/list_branches.html', branches=branches)
+
+
+
+
 #=======================router management==========================
 @app.route("/add_router", methods=["GET", "POST"])
 @login_required
@@ -342,6 +362,35 @@ def list_routers():
     with get_db() as db:
         routers = db.query(Router).options(joinedload(Router.branch)).all()
     return render_template("admin/list_routers.html", routers=routers)
+
+#---------------------list branch 
+@app.route("/branch/<int:branch_id>/customers")
+@login_required
+@roles_required("admin", "super_admin")
+def customers_by_branch(branch_id):
+    with get_db() as db:
+        branch = db.query(Branch).filter_by(id=branch_id).first()
+        if not branch:
+            flash("Branch not found", "danger")
+            return redirect(url_for("list_branches"))
+
+        customers = (
+            db.query(Customer)
+            .join(Customer.router)
+            .filter(Router.branch_id == branch_id)
+            .options(
+                joinedload(Customer.network),
+                joinedload(Customer.router).joinedload(Router.branch)
+            )
+            .all()
+        )
+
+    return render_template(
+        "admin/customer_table.html",
+        branch=branch,
+        customers=customers
+    )
+
 
 # ------------------ EDIT ROUTER ------------------
 @app.route("/edit_router/<int:router_id>", methods=["GET", "POST"])
@@ -440,6 +489,202 @@ def test_router(router_id):
         db.close()
 
     return redirect(url_for("list_routers"))
+
+
+# @app.route("/import_customers", methods=["POST"])
+# @login_required
+# @roles_required("admin", "super_admin")
+# def import_customers():
+#     db = None
+#     try:
+#         db = SessionLocal()
+#         file = request.files.get("excel_file")
+
+#         if not file:
+#             flash("No file uploaded", "danger")
+#             return redirect(url_for("admin_dashboard"))
+
+#         import pandas as pd
+#         df = pd.read_excel(file)
+
+#         for _, row in df.iterrows():
+#             # ===== Look up branch =====
+#             branch_name = row.get("branch")
+#             branch = db.query(Branch).filter_by(name=branch_name).first()
+#             if not branch:
+#                 flash(f"Branch '{branch_name}' not found", "danger")
+#                 continue  # skip this row
+
+#             # ===== Look up router under the branch =====
+#             router_ip = row.get("router_ip")
+#             router = db.query(Router).filter_by(ip_address=router_ip, branch_id=branch.id).first()
+#             if not router:
+#                 flash(f"Router '{router_ip}' not found in branch '{branch_name}'", "danger")
+#                 continue  # skip this row
+
+#             # ===== Create Customer =====
+#             customer = Customer(
+#                 account_no=row.get("account_no"),
+#                 name=row.get("name"),
+#                 phone=row.get("phone"),
+#                 email=row.get("email"),
+#                 location=row.get("location"),
+#                 ip_address=row.get("ip_address"),
+#                 billing_amount=row.get("billing_amount"),
+#                 start_date=row.get("start_date"),
+#                 contract_date=row.get("contract_date"),
+#                 router_id=router.id,
+#             )
+#             db.add(customer)
+
+#         db.commit()
+#         flash("Customers imported successfully!", "success")
+
+#     except Exception as e:
+#         if db:
+#             db.rollback()
+#         flash(f"Error importing customers: {str(e)}", "danger")
+#     finally:
+#         if db:
+#             db.close()
+
+#     return redirect(url_for("admin_dashboard"))
+
+@app.route("/import_customers", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def import_customers():
+
+    file = request.files.get("excel_file")
+    if not file:
+        flash("No Excel file uploaded", "danger")
+        return redirect(url_for("admin_dashboard"))
+
+    # ==================== READ & NORMALIZE EXCEL ====================
+    df = pd.read_excel(file)
+
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lower()
+        .str.replace(" ", "_")
+    )
+
+    required_columns = [
+        "account_no", "customer_name", "phone", "ip_address",
+        "billing_amount", "start_date", "branch_name", "router_ip"
+    ]
+
+    missing_cols = [c for c in required_columns if c not in df.columns]
+    if missing_cols:
+        flash(f"Missing columns: {', '.join(missing_cols)}", "danger")
+        return redirect(url_for("admin_dashboard"))
+
+    db = SessionLocal()
+    success = 0
+    errors = []
+
+    try:
+        for index, row in df.iterrows():
+            row_no = index + 2  # Excel row number
+
+            # ==================== VALIDATE ====================
+            if pd.isna(row["branch_name"]):
+                errors.append(f"Row {row_no}: Missing branch name")
+                continue
+
+            if pd.isna(row["router_ip"]):
+                errors.append(f"Row {row_no}: Missing router IP")
+                continue
+
+            # ==================== BRANCH ====================
+            branch_name = str(row["branch_name"]).strip()
+
+            branch = db.query(Branch).filter(
+                Branch.name.ilike(branch_name)
+            ).first()
+
+            if not branch:
+                branch = Branch(name=branch_name)
+                db.add(branch)
+                db.flush()  # get branch.id
+
+            # ==================== ROUTER ====================
+            router_ip = str(row["router_ip"]).strip()
+
+            router = db.query(Router).filter_by(
+                ip_address=router_ip
+            ).first()
+
+            if not router:
+                router = Router(
+                    ip_address=router_ip,
+                    description=f"Auto-created ({branch_name})",
+                    branch_id=branch.id,
+                    username="admin",
+                    password="admin",  # change later
+                    port=8728
+                )
+                db.add(router)
+                db.flush()
+
+            # ==================== CUSTOMER ====================
+            customer = Customer(
+                account_no=str(row["account_no"]).strip(),
+                name=str(row["customer_name"]).strip(),
+                phone=str(row["phone"]).strip(),
+                email=row.get("email"),
+                ip_address=str(row["ip_address"]).strip(),  # CUSTOMER IP (can repeat)
+                location=row.get("location"),
+                billing_amount=float(row["billing_amount"]),
+                start_date=row["start_date"],
+                contract_date=row.get("contract_date"),
+                status="active",
+                router_id=router.id
+            )
+
+            db.add(customer)
+            db.flush()
+
+            # ==================== CUSTOMER NETWORK ====================
+            network = CustomerNetwork(
+                customer_id=customer.id,
+                cable_no=row.get("cable_no"),
+                cable_type=row.get("cable_type"),
+                splitter=row.get("splitter"),
+                tube_no=row.get("tube_no"),
+                core_used=row.get("core_used"),
+                loop_no=row.get("loop_no"),
+                power_level=row.get("power_level"),
+                final_coordinates=row.get("final_coordinates"),
+                coordinates=row.get("coordinates")
+            )
+
+            db.add(network)
+
+            success += 1
+
+        db.commit()
+        flash(f"{success} customers imported successfully", "success")
+
+        if errors:
+            flash("Some rows failed: " + "; ".join(errors), "warning")
+
+    except IntegrityError as e:
+        db.rollback()
+        flash("Database error: possible duplicate Account No", "danger")
+
+    except Exception as e:
+        db.rollback()
+        flash(f"Error importing Excel: {str(e)}", "danger")
+
+    finally:
+        db.close()
+
+    return redirect(url_for("admin_dashboard"))
+
+
+
 
 # ==================== CUSTOMER MANAGEMENT ====================
 @app.route("/add_customer", methods=["GET", "POST"])
@@ -868,6 +1113,72 @@ def export_customers():
 
     )
 
+#-------export branch------------
+@app.route("/branch/<int:branch_id>/customers/export")
+@login_required
+@roles_required("admin", "super_admin")
+def export_customers_by_branch(branch_id):
+    with get_db() as db:
+        branch = db.query(Branch).filter_by(id=branch_id).first()
+        if not branch:
+            flash("Branch not found", "danger")
+            return redirect(url_for("list_branches"))
+
+        customers = (
+            db.query(Customer)
+            .join(Customer.router)
+            .filter(Router.branch_id == branch_id)
+            .options(
+                joinedload(Customer.network),
+                joinedload(Customer.router).joinedload(Router.branch)
+            )
+            .all()
+        )
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = f"{branch.name} Customers"
+
+        headers = [
+            "Account No", "Name", "Phone", "Email", "Location",
+            "IP Address", "Branch", "Billing Amount",
+            "Cable No", "Loop No", "Power Level",
+            "Final Coordinates", "Coordinates",
+            "Date Registered", "Status"
+        ]
+        ws.append(headers)
+
+        for c in customers:
+            ws.append([
+                c.account_no,
+                c.name,
+                c.phone,
+                c.email,
+                c.location,
+                c.ip_address,
+                branch.name,
+                c.billing_amount,
+                c.network.cable_no if c.network else "",
+                c.network.loop_no if c.network else "",
+                c.network.power_level if c.network else "",
+                c.network.final_coordinates if c.network else "",
+                c.network.coordinates if c.network else "",
+                c.start_date.strftime("%Y-%m-%d %H:%M:%S") if c.start_date else "",
+                c.status
+            ])
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f"{branch.name}_customers.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
 @app.route("/toggle_suspend/<int:customer_id>")
 @login_required
 @roles_required("admin", "super_admin")
@@ -1045,7 +1356,7 @@ scheduler.add_job(
 if __name__ == "__main__":
  
     if not scheduler.running:
-    scheduler.start()
+     scheduler.start()
 
     print("Scheduler started successfully.")
 

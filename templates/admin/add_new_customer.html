@@ -4,152 +4,145 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 
 <div class="container mt-5">
-    <h2 class="mb-4">Add New Customer</h2>
+    <h2 class="mb-4">Customer Management</h2>
 
-    <form method="POST">
-        <!-- ==================== ACCOUNT INFO ==================== -->
-        <div class="row mb-3">
-            <div class="col-md-4">
-                <label class="form-label">Account No</label>
-                <input type="text" class="form-control" name="account_no" required>
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Customer Name</label>
-                <input type="text" class="form-control" name="name" required>
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Phone</label>
-                <input type="text" class="form-control" name="phone" required>
-            </div>
+    <!-- ==================== IMPORT CUSTOMERS FROM EXCEL ==================== -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-body">
+            <h5 class="card-title">📥 Import Customers from Excel</h5>
+            <form action="{{ url_for('import_customers') }}" method="POST" enctype="multipart/form-data">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <input type="file" name="excel_file" accept=".xlsx,.xls" required class="form-control form-control-sm">
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success btn-sm">📥 Import Excel</button>
+            </form>
+
+            <!-- Flash messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% if messages %}
+                <ul class="mt-2">
+                  {% for category, message in messages %}
+                    <li class="text-{{ 'success' if category=='success' else 'danger' }}">{{ message }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            {% endwith %}
         </div>
+    </div>
 
-        <div class="row mb-3">
-            <div class="col-md-4">
-                <label class="form-label">Email</label>
-                <input type="email" class="form-control" name="email">
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Location</label>
-                <input type="text" class="form-control" name="location">
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">IP Address</label>
-                <input type="text" class="form-control" name="ip_address" required>
-            </div>
+    <!-- ==================== MANUAL ADD CUSTOMER ==================== -->
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <h5 class="card-title">➕ Add New Customer Manually</h5>
+            <form method="POST">
+                <!-- ACCOUNT INFO -->
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Account No</label>
+                        <input type="text" class="form-control" name="account_no" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Customer Name</label>
+                        <input type="text" class="form-control" name="name" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Phone</label>
+                        <input type="text" class="form-control" name="phone" required>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Fat/id</label>
+                        <input type="email" class="form-control" name="email">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Location</label>
+                        <input type="text" class="form-control" name="location">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">IP Address</label>
+                        <input type="text" class="form-control" name="ip_address" required>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Billing Amount</label>
+                        <input type="number" class="form-control" name="billing_amount" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Start Date</label>
+                        <input type="date" class="form-control" name="start_date" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Contract Date</label>
+                        <input type="date" class="form-control" name="contract_date">
+                    </div>
+                </div>
+
+                <!-- NETWORK INFO -->
+                <h5 class="mt-4">Network Info</h5>
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Branch Name</label>
+                        <input type="text" class="form-control" name="branch_name" placeholder="e.g. Kamala">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Router IP</label>
+                        <input type="text" class="form-control" name="router_ip" placeholder="e.g. 10.25.25.69">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Cable No</label>
+                        <input type="text" class="form-control" name="cable_no">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Cable Type</label>
+                        <input type="text" class="form-control" name="cable_type">
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Splitter</label>
+                        <input type="text" class="form-control" name="splitter">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Tube No</label>
+                        <input type="text" class="form-control" name="tube_no">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Core Used</label>
+                        <input type="text" class="form-control" name="core_used">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Loop No</label>
+                        <input type="text" class="form-control" name="loop_no">
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Power Level</label>
+                        <input type="text" class="form-control" name="power_level">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Primary Fat Coordinates</label>
+                        <input type="text" class="form-control" name="final_coordinates">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Customer Coordinates</label>
+                        <input type="text" class="form-control" name="coordinates">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-success">Add Customer</button>
+                <a href="{{ url_for('list_customers') }}" class="btn btn-secondary">Cancel</a>
+            </form>
         </div>
-
-        <div class="row mb-3">
-            <div class="col-md-4">
-                <label class="form-label">Billing Amount</label>
-                <input type="number" class="form-control" name="billing_amount" required>
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Start Date</label>
-                <input type="date" class="form-control" name="start_date" required>
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Contract Date</label>
-                <input type="date" class="form-control" name="contract_date">
-            </div>
-        </div>
-
-        <!-- ==================== BRANCH & ROUTER ==================== -->
-        <div class="row mb-3">
-            <div class="col-md-6">
-                <label class="form-label">Branch</label>
-                <select name="branch_id" id="branchSelect" class="form-select" required>
-                    {% for branch in branches %}
-                        <option value="{{ branch.id }}">{{ branch.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="col-md-6">
-                <label class="form-label">Router</label>
-                <select name="router_id" id="routerSelect" class="form-select" required>
-                    <option value="">-- Select Router --</option>
-                    {% for router in routers %}
-                        <option value="{{ router.id }}">{{ router.ip_address }}{% if router.description %} - {{ router.description }}{% endif %}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
-
-        <!-- ==================== NETWORK INFO ==================== -->
-        <h5 class="mt-4">Network Info</h5>
-        <div class="row mb-3">
-            <div class="col-md-3">
-                <label class="form-label">Cable No</label>
-                <input type="text" class="form-control" name="cable_no">
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Cable Type</label>
-                <input type="text" class="form-control" name="cable_type">
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Splitter</label>
-                <input type="text" class="form-control" name="splitter">
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Tube No</label>
-                <input type="text" class="form-control" name="tube_no">
-            </div>
-        </div>
-
-        <div class="row mb-3">
-            <div class="col-md-3">
-                <label class="form-label">Core Used</label>
-                <input type="text" class="form-control" name="core_used">
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Loop No</label>
-                <input type="text" class="form-control" name="loop_no">
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Power Level</label>
-                <input type="text" class="form-control" name="power_level">
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Final Coordinates</label>
-                <input type="text" class="form-control" name="final_coordinates">
-            </div>
-        </div>
-
-        <div class="row mb-3">
-            <div class="col-md-12">
-                <label class="form-label">Coordinates</label>
-                <input type="text" class="form-control" name="coordinates">
-            </div>
-        </div>
-
-        <button type="submit" class="btn btn-success">Add Customer</button>
-        <a href="{{ url_for('list_customers') }}" class="btn btn-secondary">Cancel</a>
-    </form>
+    </div>
 </div>
-
-<!-- ==================== DYNAMIC ROUTER SCRIPT ==================== -->
-<script>
-document.getElementById('branchSelect').addEventListener('change', function() {
-    const branchId = this.value;
-    const routerSelect = document.getElementById('routerSelect');
-    routerSelect.innerHTML = '<option value="">Loading...</option>';
-
-    fetch(`/get_router_ip/${branchId}`)
-        .then(res => res.json())
-        .then(data => {
-            routerSelect.innerHTML = '<option value="">-- Select Router --</option>';
-            data.forEach(router => {
-                const option = document.createElement('option');
-                option.value = router.id;
-                option.text = router.ip_address + (router.description ? ' - ' + router.description : '');
-                routerSelect.appendChild(option);
-            });
-        })
-        .catch(err => {
-            console.error(err);
-            routerSelect.innerHTML = '<option value="">Error loading routers</option>';
-        });
-});
-</script>
 
 {% endblock %}

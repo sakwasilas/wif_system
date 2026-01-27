@@ -1,0 +1,80 @@
+<!-- templates/admin/_customer_table.html -->
+
+<!-- Bootstrap CSS -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<!-- DataTables CSS -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
+
+<div class="container mt-4">
+    <table id="customerTable" class="table table-striped table-hover table-bordered text-center">
+        <thead class="table-primary">
+            <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>IP Address</th>
+                <th>Router</th>
+                <th>Branch</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for customer in customers %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ customer.name }}</td>
+                <td>{{ customer.ip_address }}</td>
+                <td>
+                    {% if customer.router %}
+                        <span class="badge bg-info text-dark">{{ customer.router.description }}</span>
+                    {% else %}
+                        <span class="badge bg-secondary">N/A</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if customer.router and customer.router.branch %}
+                        <span class="badge bg-success">{{ customer.router.branch.name }}</span>
+                    {% else %}
+                        <span class="badge bg-secondary">N/A</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="#" class="btn btn-sm btn-outline-primary">View</a>
+                    <a href="#" class="btn btn-sm btn-outline-warning">Edit</a>
+                    <a href="#" class="btn btn-sm btn-outline-danger">Delete</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6" class="text-center text-muted">No customers found</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Bootstrap JS Bundle -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- jQuery (required by DataTables) -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+<!-- DataTables JS -->
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+
+<!-- Initialize DataTables -->
+<script>
+    $(document).ready(function() {
+        $('#customerTable').DataTable({
+            "paging": true,        // Enable pagination
+            "searching": true,     // Enable search
+            "ordering": true,      // Enable column sorting
+            "info": true,          // Show table info
+            "lengthMenu": [5, 10, 25, 50], // Rows per page
+            "columnDefs": [
+                { "orderable": false, "targets": 5 } // Disable ordering on Actions column
+            ]
+        });
+    });
+</script>

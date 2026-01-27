@@ -62,7 +62,7 @@ class Customer(Base):
     name = Column(String(255), nullable=False)
     phone = Column(String(50), nullable=False)
     email = Column(String(255))
-    ip_address = Column(String(50), nullable=False, unique=True)
+    ip_address = Column(String(50), nullable=False)
     location = Column(String(255))
     billing_amount = Column(Float, nullable=False)
     start_date = Column(DateTime, nullable=True)
