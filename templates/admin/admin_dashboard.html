@@ -14,10 +14,13 @@
         .stat-card { border-radius: 10px; padding: 0.8rem; margin-bottom: 0.8rem; text-align: center; color: #fff; cursor: default; }
         .stat-card h5 { font-size: 0.9rem; margin-bottom: 0.2rem; }
         .stat-card h2 { font-size: 1.4rem; margin: 0; }
+
         .stat-card.active { background: #28a745; }
         .stat-card.grace { background: #ffc107; color: #212529; cursor:pointer; }
         .stat-card.suspended { background: #dc3545; cursor:pointer; }
+        .stat-card.pending { background: #0d6efd; cursor:pointer; }  /* ✅ NEW */
         .stat-card.total { background: #343a40; }
+
         .main-content .card { border-radius: 12px; margin-bottom: 1rem; }
         .main-content .card-title { font-size: 1rem; }
         footer { margin-top: 2rem; text-align: center; padding: 0.8rem; color: #6c757d; }
@@ -44,9 +47,14 @@
             <!-- Left Sidebar -->
             <div class="col-md-3">
                 <div class="sidebar shadow-sm">
+
                     <!-- Quick Actions -->
                     <a href="{{ url_for('add_customer') }}" class="btn btn-success btn-sm w-75 mb-2">➕ Add Customer</a>
                     <a href="{{ url_for('list_customers') }}" class="btn btn-primary btn-sm w-75 mb-2">📋 View Customers</a>
+
+                    <!-- ✅ FIXED HTML -->
+                    <a href="{{ url_for('monthly_report') }}" class="btn btn-danger btn-sm w-75 mb-3">⚙️ Reports</a>
+
                     <a href="{{ url_for('manual_manage_customers') }}" class="btn btn-danger btn-sm w-75 mb-3">⚙️ Manage Customers Manually</a>
 
                     <!-- User Management (Super Admin only) -->
@@ -62,18 +70,28 @@
                         <h5>Active Users</h5>
                         <h2>{{ active_users }}</h2>
                     </div>
+
                     <div class="stat-card grace" onclick="window.location='{{ url_for('grace_customers') }}';">
                         <h5>In Grace</h5>
                         <h2>{{ grace_users }}</h2>
                     </div>
+
                     <div class="stat-card suspended" onclick="window.location='{{ url_for('suspended_customers') }}';">
                         <h5>Suspended</h5>
                         <h2>{{ suspended_users }}</h2>
                     </div>
+
+                    <!-- ✅ NEW: Pending Router -->
+                    <div class="stat-card pending" onclick="window.location='{{ url_for('list_customers', status='pending_router') }}';">
+                        <h5>Pending Router</h5>
+                        <h2>{{ pending_router_users }}</h2>
+                    </div>
+
                     <div class="stat-card total">
-                        <h5>Total Active</h5>
+                        <h5>Total Users</h5>
                         <h2>{{ total_users }}</h2>
                     </div>
+
                 </div>
             </div>
 
@@ -103,7 +121,15 @@
                           {% if messages %}
                             <ul class="mt-2">
                               {% for category, message in messages %}
-                                <li class="text-{{ 'success' if category=='success' else 'danger' }}">{{ message }}</li>
+                                {% if category == "success" %}
+                                  <li class="text-success">{{ message }}</li>
+                                {% elif category == "warning" %}
+                                  <li class="text-warning">{{ message }}</li>
+                                {% elif category == "info" %}
+                                  <li class="text-info">{{ message }}</li>
+                                {% else %}
+                                  <li class="text-danger">{{ message }}</li>
+                                {% endif %}
                               {% endfor %}
                             </ul>
                           {% endif %}

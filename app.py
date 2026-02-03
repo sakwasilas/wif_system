@@ -3,6 +3,9 @@ import os
 import io
 from datetime import datetime, timedelta
 import pandas as pd
+from sqlalchemy.exc import IntegrityError
+
+from sqlalchemy import func, case  
 
 # ==================== FLASK ====================
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
@@ -23,6 +26,10 @@ from models import User, Customer, CustomerNetwork, Branch, Router
 # ==================== FLASK APP ====================
 app = Flask(__name__)
 app.secret_key = "123456123456silas123456"
+
+@app.teardown_appcontext
+def remove_session(exception=None):
+    SessionLocal.remove()
 
 scheduler = APScheduler()
 
@@ -119,6 +126,7 @@ def login():
 
 
 @app.route("/logout")
+
 def logout():
     session.clear()
     flash("Logged out successfully", "info")
@@ -136,6 +144,7 @@ def admin_dashboard():
         active_users = db.query(Customer).filter_by(status="active").count()
         grace_users = db.query(Customer).filter_by(status="grace").count()
         suspended_users = db.query(Customer).filter_by(status="suspended").count()
+        pending_router_users = db.query(Customer).filter_by(status="pending_router").count()  # ✅ NEW
 
         # Get all branches and routers for dropdowns
         branches = db.query(Branch).all()
@@ -149,12 +158,14 @@ def admin_dashboard():
             active_users=active_users,
             grace_users=grace_users,
             suspended_users=suspended_users,
+            pending_router_users=pending_router_users,  # ✅ NEW
             branches=branches,
             routers=routers,
             datetime=datetime
         )
     finally:
         db.close()
+
 
 
 # ==================== USER MANAGEMENT ====================
@@ -550,17 +561,36 @@ def test_router(router_id):
 
 #     return redirect(url_for("admin_dashboard"))
 
+def to_str(val):
+    """Convert value to string or None if empty."""
+    if val is None or (isinstance(val, float) and pd.isna(val)) or str(val).strip() == "":
+        return None
+    return str(val).strip()
+
+def to_float(val):
+    """Convert value to float or None if empty."""
+    if val is None or (isinstance(val, float) and pd.isna(val)) or str(val).strip() == "":
+        return None
+    try:
+        return float(val)
+    except ValueError:
+        return None
+
+def to_datetime(val):
+    """Convert value to datetime or None if empty."""
+    if val is None or (isinstance(val, float) and pd.isna(val)) or str(val).strip() == "":
+        return None
+    return val  # If using pandas datetime, it’s already a datetime object
+
 @app.route("/import_customers", methods=["POST"])
 @login_required
 @roles_required("admin", "super_admin")
 def import_customers():
-
     file = request.files.get("excel_file")
     if not file:
         flash("No Excel file uploaded", "danger")
         return redirect(url_for("admin_dashboard"))
 
-    # ==================== READ & NORMALIZE EXCEL ====================
     df = pd.read_excel(file)
 
     df.columns = (
@@ -588,78 +618,80 @@ def import_customers():
         for index, row in df.iterrows():
             row_no = index + 2  # Excel row number
 
-            # ==================== VALIDATE ====================
-            if pd.isna(row["branch_name"]):
-                errors.append(f"Row {row_no}: Missing branch name")
+            if row.isnull().all():
                 continue
 
-            if pd.isna(row["router_ip"]):
-                errors.append(f"Row {row_no}: Missing router IP")
+            # ----------------- Branch -----------------
+            branch_name = to_str(row.get("branch_name"))
+            if not branch_name:
+                errors.append(f"Row {row_no}: Missing branch_name")
                 continue
 
-            # ==================== BRANCH ====================
-            branch_name = str(row["branch_name"]).strip()
-
-            branch = db.query(Branch).filter(
-                Branch.name.ilike(branch_name)
-            ).first()
-
+            branch = db.query(Branch).filter(Branch.name.ilike(branch_name)).first()
             if not branch:
                 branch = Branch(name=branch_name)
                 db.add(branch)
-                db.flush()  # get branch.id
-
-            # ==================== ROUTER ====================
-            router_ip = str(row["router_ip"]).strip()
-
-            router = db.query(Router).filter_by(
-                ip_address=router_ip
-            ).first()
-
-            if not router:
-                router = Router(
-                    ip_address=router_ip,
-                    description=f"Auto-created ({branch_name})",
-                    branch_id=branch.id,
-                    username="admin",
-                    password="admin",  # change later
-                    port=8728
-                )
-                db.add(router)
                 db.flush()
 
-            # ==================== CUSTOMER ====================
+            # ----------------- Router (OPTIONAL) -----------------
+            router_ip = to_str(row.get("router_ip"))
+            router = None
+
+            if router_ip:
+                router = db.query(Router).filter_by(ip_address=router_ip).first()
+                if not router:
+                    # Do NOT create router here
+                    errors.append(
+                        f"Row {row_no}: Router '{router_ip}' not found. Customer imported WITHOUT router (assign later)."
+                    )
+                    router = None
+                else:
+                    # Optional: if router exists but belongs to different branch, warn and ignore router
+                    if router.branch_id != branch.id:
+                        errors.append(
+                            f"Row {row_no}: Router '{router_ip}' is not under branch '{branch_name}'. "
+                            f"Customer imported WITHOUT router (fix router branch or Excel)."
+                        )
+                        router = None
+
+            # ----------------- Customer IP (recommended required) -----------------
+            customer_ip = to_str(row.get("ip_address"))
+            if not customer_ip:
+                errors.append(f"Row {row_no}: Missing customer ip_address")
+                continue
+
+            # ----------------- Create Customer -----------------
             customer = Customer(
-                account_no=str(row["account_no"]).strip(),
-                name=str(row["customer_name"]).strip(),
-                phone=str(row["phone"]).strip(),
-                email=row.get("email"),
-                ip_address=str(row["ip_address"]).strip(),  # CUSTOMER IP (can repeat)
-                location=row.get("location"),
-                billing_amount=float(row["billing_amount"]),
-                start_date=row["start_date"],
-                contract_date=row.get("contract_date"),
-                status="active",
-                router_id=router.id
+                account_no=to_str(row.get("account_no")),
+                name=to_str(row.get("customer_name")),
+                phone=to_str(row.get("phone")),
+                email=to_str(row.get("email")),
+                ip_address=customer_ip,
+                location=to_str(row.get("location")),
+                billing_amount=to_float(row.get("billing_amount")),
+                start_date=to_datetime(row.get("start_date")),
+                contract_date=to_datetime(row.get("contract_date")),
+                # If router is missing, mark as pending_router (you can rename if you want)
+                status="active" if router else "pending_router",
+                router_id=router.id if router else None
             )
 
             db.add(customer)
             db.flush()
 
-            # ==================== CUSTOMER NETWORK ====================
+            # ----------------- Customer Network (optional) -----------------
             network = CustomerNetwork(
                 customer_id=customer.id,
-                cable_no=row.get("cable_no"),
-                cable_type=row.get("cable_type"),
-                splitter=row.get("splitter"),
-                tube_no=row.get("tube_no"),
-                core_used=row.get("core_used"),
-                loop_no=row.get("loop_no"),
-                power_level=row.get("power_level"),
-                final_coordinates=row.get("final_coordinates"),
-                coordinates=row.get("coordinates")
+                cable_no=to_str(row.get("cable_no")),
+                cable_type=to_str(row.get("cable_type")),
+                splitter=to_str(row.get("splitter")),
+                tube_no=to_str(row.get("tube_no")),
+                core_used=to_str(row.get("core_used")),
+                loop_no=to_str(row.get("loop_no")),
+                power_level=to_str(row.get("power_level")),
+                final_coordinates=to_str(row.get("final_coordinates")),
+                coordinates=to_str(row.get("coordinates"))
             )
-
             db.add(network)
 
             success += 1
@@ -668,9 +700,10 @@ def import_customers():
         flash(f"{success} customers imported successfully", "success")
 
         if errors:
-            flash("Some rows failed: " + "; ".join(errors), "warning")
+            # Avoid too long flash; but keep it for now
+            flash("Some rows had issues: " + " | ".join(errors), "warning")
 
-    except IntegrityError as e:
+    except IntegrityError:
         db.rollback()
         flash("Database error: possible duplicate Account No", "danger")
 
@@ -685,6 +718,27 @@ def import_customers():
 
 
 
+def to_datetime(val, fmt="%Y-%m-%d"):
+    """Convert a string or pandas datetime to Python datetime or None if empty."""
+    if val is None:
+        return None
+    if isinstance(val, float) and pd.isna(val):
+        return None
+    val_str = str(val).strip()
+    if val_str == "":
+        return None
+    if isinstance(val, datetime):
+        return val
+    # Try to parse string to datetime
+    try:
+        return datetime.strptime(val_str, fmt)
+    except ValueError:
+        return None
+
+
+
+
+
 
 # ==================== CUSTOMER MANAGEMENT ====================
 @app.route("/add_customer", methods=["GET", "POST"])
@@ -695,42 +749,44 @@ def add_customer():
         branches = db.query(Branch).all()
         routers = []
 
-        # ✅ Load routers for first branch by default
         if branches:
-            routers = db.query(Router).filter(Router.branch_id == branches[0].id).all()
+            routers = db.query(Router).filter(
+                Router.branch_id == branches[0].id
+            ).all()
 
         if request.method == "POST":
             router_id = request.form.get("router_id")
             router_id = int(router_id) if router_id else None
 
             customer = Customer(
-                account_no=request.form.get("account_no"),
-                name=request.form.get("name"),
-                phone=request.form.get("phone"),
-                email=request.form.get("email"),
-                location=request.form.get("location"),
-                ip_address=request.form.get("ip_address"),
-                billing_amount=request.form.get("billing_amount"),
-                start_date=request.form.get("start_date"),
-                contract_date=request.form.get("contract_date"),
+                account_no=to_str(request.form.get("account_no")),
+                name=to_str(request.form.get("name")),
+                phone=to_str(request.form.get("phone")),
+                email=to_str(request.form.get("email")),
+                location=to_str(request.form.get("location")),
+                ip_address=to_str(request.form.get("ip_address")),
+                billing_amount=to_float(request.form.get("billing_amount")),
+                start_date=to_datetime(request.form.get("start_date")),
+                contract_date=to_datetime(request.form.get("contract_date")),
+                status="active",
                 router_id=router_id
             )
 
             db.add(customer)
             db.commit()
+            db.refresh(customer)
 
-            # Network info
             network = CustomerNetwork(
                 customer_id=customer.id,
-                cable_no=request.form.get("cable_no"),
-                cable_type=request.form.get("cable_type"),
-                splitter=request.form.get("splitter"),
-                tube_no=request.form.get("tube_no"),
-                core_used=request.form.get("core_used"),
-                final_coordinates=request.form.get("final_coordinates"),
-                loop_no=request.form.get("loop_no"),
-                power_level=request.form.get("power_level"),
-                coordinates=request.form.get("coordinates"),
+                cable_no=to_str(request.form.get("cable_no")),
+                cable_type=to_str(request.form.get("cable_type")),
+                splitter=to_str(request.form.get("splitter")),
+                tube_no=to_str(request.form.get("tube_no")),
+                core_used=to_str(request.form.get("core_used")),
+                final_coordinates=to_str(request.form.get("final_coordinates")),
+                loop_no=to_str(request.form.get("loop_no")),
+                power_level=to_str(request.form.get("power_level")),
+                coordinates=to_str(request.form.get("coordinates")),
             )
 
             db.add(network)
@@ -745,14 +801,16 @@ def add_customer():
             routers=routers
         )
 
+
 # ==================== LIST / EDIT / DELETE CUSTOMERS ====================
 @app.route("/customers")
 @login_required
 @roles_required("admin", "super_admin")
 def list_customers():
     search_term = request.args.get("search", "").strip()
+    status_filter = request.args.get("status", "").strip()  # ✅ NEW
     page = int(request.args.get("page", 1))
-    per_page = 5
+    per_page = 2000
 
     with get_db() as db:
         query = db.query(Customer).options(
@@ -760,12 +818,17 @@ def list_customers():
             joinedload(Customer.router).joinedload(Router.branch)
         )
 
+        # ✅ Search filter
         if search_term:
             query = query.filter(
                 (Customer.account_no.ilike(f"%{search_term}%")) |
                 (Customer.name.ilike(f"%{search_term}%")) |
                 (Customer.ip_address.ilike(f"%{search_term}%"))
             )
+
+        # ✅ Status filter (pending_router, active, grace, suspended, etc.)
+        if status_filter:
+            query = query.filter(Customer.status == status_filter)
 
         total = query.count()
         customers = query.offset((page - 1) * per_page).limit(per_page).all()
@@ -778,8 +841,10 @@ def list_customers():
         per_page=per_page,
         total=total,
         has_next=has_next,
-        search_term=search_term
+        search_term=search_term,
+        status_filter=status_filter  # ✅ optional for UI highlighting
     )
+
 
 
 @app.route("/edit_customer/<int:customer_id>", methods=["GET", "POST"])
@@ -798,7 +863,7 @@ def edit_customer(customer_id):
 
         branches = db.query(Branch).all()
 
-        # ✅ Get selected branch THROUGH router
+        # ✅ Selected branch is determined by customer's router -> branch
         selected_branch_id = (
             customer.router.branch.id
             if customer.router and customer.router.branch
@@ -808,11 +873,13 @@ def edit_customer(customer_id):
         # ✅ Load routers ONLY for that branch
         routers = []
         if selected_branch_id:
-            routers = db.query(Router).filter(
-                Router.branch_id == selected_branch_id
-            ).all()
+            routers = db.query(Router).filter(Router.branch_id == selected_branch_id).all()
 
         if request.method == "POST":
+            # Keep old router id for comparison
+            old_router_id = customer.router_id
+
+            # ----------------- Customer fields -----------------
             customer.account_no = request.form.get("account_no")
             customer.name = request.form.get("name")
             customer.phone = request.form.get("phone")
@@ -823,13 +890,11 @@ def edit_customer(customer_id):
             customer.start_date = request.form.get("start_date")
             customer.contract_date = request.form.get("contract_date")
 
-            # ❌ DO NOT set customer.branch_id (it does not exist)
-
             # ✅ Assign router (router determines branch)
             selected_router_id = request.form.get("router_id")
             customer.router_id = int(selected_router_id) if selected_router_id else None
 
-            # Network info
+            # ----------------- Network fields -----------------
             network = customer.network or CustomerNetwork(customer_id=customer.id)
             network.cable_no = request.form.get("cable_no")
             network.cable_type = request.form.get("cable_type")
@@ -840,13 +905,33 @@ def edit_customer(customer_id):
             network.loop_no = request.form.get("loop_no")
             network.power_level = request.form.get("power_level")
             network.coordinates = request.form.get("coordinates")
-
             customer.network = network
 
             db.add(customer)
             db.commit()
 
-            flash("✅ Customer updated successfully!", "success")
+            # ✅ Apply MikroTik immediately (only if router exists + IP exists)
+            # IMPORTANT: Don't rely on customer.router after changing router_id; query it fresh
+            router = db.query(Router).filter_by(id=customer.router_id).first() if customer.router_id else None
+
+            if router and customer.ip_address:
+                try:
+                    # If customer is in any blocked-like state -> block
+                    if customer.status in ["suspended", "manually_suspended", "on_hold"]:
+                        block_ip(customer.ip_address, router)
+                    else:
+                        # active/grace/pending_router/anything else -> unblock to ensure access
+                        unblock_ip(customer.ip_address, router)
+
+                except Exception as e:
+                    flash(f"⚠️ Customer saved but MikroTik action failed: {e}", "warning")
+
+            # Optional info message if router not assigned
+            if customer.router_id is None:
+                flash("ℹ️ Customer updated. Router not assigned yet, so WiFi control is disabled.", "info")
+            else:
+                flash("✅ Customer updated successfully!", "success")
+
             return redirect(url_for("list_customers"))
 
         return render_template(
@@ -875,7 +960,39 @@ def delete_customer(customer_id):
             flash("❌ Customer not found", "danger")
     return redirect(url_for("list_customers"))
 
-# ==================== GRACE / WIFI ACCESS ====================
+
+
+@app.route('/admin/monthly_report')
+def monthly_report():
+    session = SessionLocal()
+
+    try:
+        # Query monthly stats
+        monthly_data = session.query(
+            func.date_format(Customer.start_date, '%Y-%m').label('month'),
+            func.sum(case([(Customer.status=='active', 1)], else_=0)).label('active_clients'),
+            func.sum(case([(Customer.status=='grace', 1)], else_=0)).label('grace_clients'),
+            func.sum(case([(Customer.status=='suspended', 1)], else_=0)).label('suspended_clients'),
+            func.sum(Customer.billing_amount).label('total_collection')
+        ).filter(Customer.start_date != None).group_by('month').order_by('month').all()
+
+        # Convert result to list of dicts for easier rendering
+        report = []
+        for row in monthly_data:
+            report.append({
+                'month': row.month,
+                'active_clients': row.active_clients,
+                'grace_clients': row.grace_clients,
+                'suspended_clients': row.suspended_clients,
+                'total_collection': row.total_collection
+            })
+
+        return render_template('admin/monthly_report.html', report=report)
+
+    finally:
+        session.close()
+
+#==================== GRACE / WIFI ACCESS ====================
 @app.route("/grace_popup/<ip_address>", methods=["GET", "POST"])
 @login_required
 @roles_required("admin", "super_admin")
@@ -925,35 +1042,39 @@ def grace_popup(ip_address):
 
         return render_template("customer/grace_popup.html", customer=customer)
 
+
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
     with get_db() as db:
-        customer = db.query(Customer).options(
-            joinedload(Customer.router)
-        ).filter_by(ip_address=ip_address).first()
-
+        customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(ip_address=ip_address).first()
         if not customer:
             return "Customer not found", 404
 
+        router = customer.router
         today = datetime.utcnow().date()
+
         start_date = customer.start_date.date() if customer.start_date else today
         subscription_end = start_date + timedelta(days=30)
+
         grace_days = customer.grace_days or 0
         grace_end = subscription_end + timedelta(days=grace_days)
+
         days_used = (today - start_date).days + 1
         days_left = max((subscription_end - today).days, 0)
 
-        status = short_message = detailed_message = None
-        router = customer.router
-        show_popup = False  # New: controls popup display
+        # ✅ Track old status so we only call MikroTik when it changes
+        old_status = customer.status
+
+        show_popup = False
+        short_message = None
+        detailed_message = None
 
         # ==================== ACTIVE ====================
         if today <= subscription_end:
             customer.status = "active"
-            status = "active"
             short_message = f"Your subscription runs from {start_date} to {subscription_end}."
 
-            # ✅ Daily notifications from day 25–30
+            # ✅ Daily notifications day 25–30
             if 25 <= days_used <= 30:
                 show_popup = True
                 detailed_message = (
@@ -962,38 +1083,49 @@ def wifi_access(ip_address):
                     f"Please make payment to continue uninterrupted service."
                 )
 
-        # ==================== GRACE PERIOD ====================
+        # ==================== GRACE ====================
         elif subscription_end < today <= grace_end:
             customer.status = "grace"
-            status = "grace"
             short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
-            if router:
-                unblock_ip(customer.ip_address, router)  # Grace: unblock IP
 
         # ==================== SUSPENDED ====================
         else:
             customer.status = "suspended"
-            status = "suspended"
-            short_message = f"Your WiFi was suspended. Subscription expired on {subscription_end} and grace ended on {grace_end}."
+            short_message = (
+                f"Your WiFi was suspended. Subscription expired on {subscription_end} "
+                f"and grace ended on {grace_end}."
+            )
             detailed_message = f"Hi {customer.name}, your account is suspended. Contact support for help."
-            if router and router.ip_address:
-                block_ip(customer.ip_address, router)  # Suspend: block IP
-                print(f"🔒 {customer.name} ({customer.ip_address}) has been blocked.")
 
+        # ✅ Save status update
         db.commit()
+
+        # ✅ MikroTik action ONLY if status changed
+        if router and customer.status != old_status:
+            try:
+                if customer.status == "suspended":
+                    block_ip(customer.ip_address, router)
+                    print(f"🔒 {customer.name} ({customer.ip_address}) blocked on {router.ip_address}")
+                else:
+                    unblock_ip(customer.ip_address, router)
+                    print(f"✅ {customer.name} ({customer.ip_address}) unblocked on {router.ip_address}")
+            except Exception as e:
+                print(f"⚠️ MikroTik action failed for {customer.ip_address} on {router.ip_address}: {e}")
 
         return render_template(
             "wifi_home.html",
             customer=customer,
-            status=status,
+            status=customer.status,
             short_message=short_message,
             detailed_message=detailed_message,
             days_left=days_left if show_popup else None,
-            show_popup=show_popup,  # New
-            current_year=datetime.utcnow().year
+            show_popup=show_popup,
+            current_year=datetime.utcnow().year,
+            timedelta=timedelta  # ✅ important because your template uses timedelta
         )
 
-# ==================== GRACE / SUSPENDED CUSTOMERS ====================
+
+#============ GRACE / SUSPENDED CUSTOMERS ====================
 @app.route("/grace_customers")
 @login_required
 @roles_required("admin", "super_admin")
@@ -1292,10 +1424,9 @@ def manual_manage_customers():
     return render_template('admin/manual_hold.html', customers=customers, datetime=datetime)
 
 # ==================== APScheduler Job ====================
-from datetime import datetime
 
 def daily_status_check(db=None):
-    """Check all customers and update WiFi status automatically."""
+    """Check all customers and update WiFi status automatically (efficient)."""
     today = datetime.utcnow().date()
     close_session = False
 
@@ -1304,31 +1435,54 @@ def daily_status_check(db=None):
         close_session = True
 
     try:
-        customers = db.query(Customer).all()
+        # ✅ Load routers with customers to avoid lazy-load issues
+        customers = db.query(Customer).options(joinedload(Customer.router)).all()
+
         for customer in customers:
             router = customer.router
-            start_date = customer.start_date.date() if customer.start_date else today
-            subscription_end = start_date + timedelta(days=30)
-            grace_days = customer.grace_days or 1
-            grace_end = subscription_end + timedelta(days=grace_days)
             old_status = customer.status
 
+            # ✅ If manually suspended or on hold, scheduler should NOT override
+            if old_status in ["manually_suspended", "on_hold"]:
+                continue
+
+            start_date = customer.start_date.date() if customer.start_date else today
+            subscription_end = start_date + timedelta(days=30)
+
+            grace_days = customer.grace_days or 0
+            grace_end = subscription_end + timedelta(days=grace_days)
+
+            # ✅ Determine new status
             if today <= subscription_end:
-                customer.status = "active"
-                if old_status != "active" and router:
-                    unblock_ip(customer.ip_address, router)
+                new_status = "active"
             elif subscription_end < today <= grace_end:
-                customer.status = "grace"
-                if router:
-                    unblock_ip(customer.ip_address, router)
+                new_status = "grace"
             else:
-                customer.status = "suspended"
-                if old_status != "suspended" and router:
-                    block_ip(customer.ip_address, router)
+                new_status = "suspended"
+
+            # ✅ Update DB status
+            customer.status = new_status
+
+            # ✅ MikroTik action only if status changed
+            if router and new_status != old_status:
+                try:
+                    if new_status == "suspended":
+                        block_ip(customer.ip_address, router)
+                        print(f"🔒 Scheduler blocked {customer.ip_address} on {router.ip_address}")
+                    else:
+                        unblock_ip(customer.ip_address, router)
+                        print(f"✅ Scheduler unblocked {customer.ip_address} on {router.ip_address}")
+                except Exception as e:
+                    print(f"⚠️ Scheduler MikroTik error for {customer.ip_address} on {router.ip_address}: {e}")
+
         db.commit()
+
     finally:
         if close_session:
             db.close()
+
+
+
 
 # ==================== SCHEDULER SETUP ====================
 # For testing: run every 5 minutes
@@ -1360,4 +1514,4 @@ if __name__ == "__main__":
 
     print("Scheduler started successfully.")
 
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=False, host="0.0.0.0", port=5000)

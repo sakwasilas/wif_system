@@ -1,0 +1,22 @@
+<table class="table table-bordered table-striped">
+    <thead>
+        <tr>
+            <th>Year-Month</th>
+            <th>Active</th>
+            <th>Grace</th>
+            <th>Suspended</th>
+            <th>Total Collection</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in report %}
+        <tr>
+            <td>{{ row.month }}</td>
+            <td>{{ row.active_clients }}</td>
+            <td>{{ row.grace_clients }}</td>
+            <td>{{ row.suspended_clients }}</td>
+            <td>{{ row.total_collection }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
