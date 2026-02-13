@@ -52,9 +52,8 @@
                     <a href="{{ url_for('add_customer') }}" class="btn btn-success btn-sm w-75 mb-2">➕ Add Customer</a>
                     <a href="{{ url_for('list_customers') }}" class="btn btn-primary btn-sm w-75 mb-2">📋 View Customers</a>
 
-                    <!-- ✅ FIXED HTML -->
+                    <!-- Reports / Manual -->
                     <a href="{{ url_for('monthly_report') }}" class="btn btn-danger btn-sm w-75 mb-3">⚙️ Reports</a>
-
                     <a href="{{ url_for('manual_manage_customers') }}" class="btn btn-danger btn-sm w-75 mb-3">⚙️ Manage Customers Manually</a>
 
                     <!-- User Management (Super Admin only) -->
@@ -71,18 +70,23 @@
                         <h2>{{ active_users }}</h2>
                     </div>
 
-                    <div class="stat-card grace" onclick="window.location='{{ url_for('grace_customers') }}';">
+                    <!-- ✅ FIXED: was grace_customers -->
+                    <div class="stat-card grace"
+                         onclick="window.location='{{ url_for('list_customers', status='grace') }}';">
                         <h5>In Grace</h5>
                         <h2>{{ grace_users }}</h2>
                     </div>
 
-                    <div class="stat-card suspended" onclick="window.location='{{ url_for('suspended_customers') }}';">
+                    <!-- ✅ RECOMMENDED: filter list_customers instead of separate route -->
+                    <div class="stat-card suspended"
+                         onclick="window.location='{{ url_for('list_customers', status='suspended') }}';">
                         <h5>Suspended</h5>
                         <h2>{{ suspended_users }}</h2>
                     </div>
 
-                    <!-- ✅ NEW: Pending Router -->
-                    <div class="stat-card pending" onclick="window.location='{{ url_for('list_customers', status='pending_router') }}';">
+                    <!-- Pending Router -->
+                    <div class="stat-card pending"
+                         onclick="window.location='{{ url_for('list_customers', status='pending_router') }}';">
                         <h5>Pending Router</h5>
                         <h2>{{ pending_router_users }}</h2>
                     </div>
@@ -109,6 +113,7 @@
                         <p class="card-text text-muted small">
                             Import customers from Excel. Branch names and router IPs will be read directly from the Excel sheet.
                         </p>
+
                         <form action="{{ url_for('import_customers') }}" method="POST" enctype="multipart/form-data">
                             <div class="mb-2">
                                 <input type="file" name="excel_file" accept=".xlsx,.xls" required class="form-control form-control-sm">
@@ -142,6 +147,7 @@
                     <div class="card-body">
                         <h5 class="card-title">Branch & Router Management</h5>
                         <p class="card-text text-muted small">Add or view network branches and routers manually.</p>
+
                         <a href="{{ url_for('add_branch') }}" class="btn btn-info btn-sm w-25 mb-2">🏢 Add Branch</a>
                         <a href="{{ url_for('add_router') }}" class="btn btn-secondary btn-sm w-25 mb-2">🖧 Add Router</a>
                         <a href="{{ url_for('list_branches') }}" class="btn btn-success btn-sm w-25 mb-2">🏢 View Branch Customers</a>

@@ -81,6 +81,8 @@ def get_db():
     finally:
         db.close()
 
+def popup_due(last_shown, today):
+    return (last_shown is None) or (last_shown != today)
 
 @app.route('/')
 def home():
@@ -502,65 +504,6 @@ def test_router(router_id):
     return redirect(url_for("list_routers"))
 
 
-# @app.route("/import_customers", methods=["POST"])
-# @login_required
-# @roles_required("admin", "super_admin")
-# def import_customers():
-#     db = None
-#     try:
-#         db = SessionLocal()
-#         file = request.files.get("excel_file")
-
-#         if not file:
-#             flash("No file uploaded", "danger")
-#             return redirect(url_for("admin_dashboard"))
-
-#         import pandas as pd
-#         df = pd.read_excel(file)
-
-#         for _, row in df.iterrows():
-#             # ===== Look up branch =====
-#             branch_name = row.get("branch")
-#             branch = db.query(Branch).filter_by(name=branch_name).first()
-#             if not branch:
-#                 flash(f"Branch '{branch_name}' not found", "danger")
-#                 continue  # skip this row
-
-#             # ===== Look up router under the branch =====
-#             router_ip = row.get("router_ip")
-#             router = db.query(Router).filter_by(ip_address=router_ip, branch_id=branch.id).first()
-#             if not router:
-#                 flash(f"Router '{router_ip}' not found in branch '{branch_name}'", "danger")
-#                 continue  # skip this row
-
-#             # ===== Create Customer =====
-#             customer = Customer(
-#                 account_no=row.get("account_no"),
-#                 name=row.get("name"),
-#                 phone=row.get("phone"),
-#                 email=row.get("email"),
-#                 location=row.get("location"),
-#                 ip_address=row.get("ip_address"),
-#                 billing_amount=row.get("billing_amount"),
-#                 start_date=row.get("start_date"),
-#                 contract_date=row.get("contract_date"),
-#                 router_id=router.id,
-#             )
-#             db.add(customer)
-
-#         db.commit()
-#         flash("Customers imported successfully!", "success")
-
-#     except Exception as e:
-#         if db:
-#             db.rollback()
-#         flash(f"Error importing customers: {str(e)}", "danger")
-#     finally:
-#         if db:
-#             db.close()
-
-#     return redirect(url_for("admin_dashboard"))
-
 def to_str(val):
     """Convert value to string or None if empty."""
     if val is None or (isinstance(val, float) and pd.isna(val)) or str(val).strip() == "":
@@ -575,12 +518,6 @@ def to_float(val):
         return float(val)
     except ValueError:
         return None
-
-def to_datetime(val):
-    """Convert value to datetime or None if empty."""
-    if val is None or (isinstance(val, float) and pd.isna(val)) or str(val).strip() == "":
-        return None
-    return val  # If using pandas datetime, it’s already a datetime object
 
 @app.route("/import_customers", methods=["POST"])
 @login_required
@@ -880,15 +817,17 @@ def edit_customer(customer_id):
             old_router_id = customer.router_id
 
             # ----------------- Customer fields -----------------
-            customer.account_no = request.form.get("account_no")
+            customer.account_no = to_str(request.form.get("account_no"))
             customer.name = request.form.get("name")
             customer.phone = request.form.get("phone")
             customer.email = request.form.get("email")
             customer.location = request.form.get("location")
             customer.ip_address = request.form.get("ip_address")
-            customer.billing_amount = request.form.get("billing_amount")
-            customer.start_date = request.form.get("start_date")
-            customer.contract_date = request.form.get("contract_date")
+            customer.billing_amount = to_float(request.form.get("billing_amount"))
+            customer.start_date = to_datetime(request.form.get("start_date"))
+            customer.contract_date = to_datetime(request.form.get("contract_date"))
+
+            
 
             # ✅ Assign router (router determines branch)
             selected_router_id = request.form.get("router_id")
@@ -1042,6 +981,58 @@ def grace_popup(ip_address):
 
         return render_template("customer/grace_popup.html", customer=customer)
 
+@app.route("/activate_grace/<path:ip_address>", methods=["POST"])
+def activate_grace(ip_address):
+    # ✅ get next url from query string (passed from the form action)
+    next_url = (
+        request.args.get("next")
+        or request.form.get("next")
+        or request.args.get("dst")
+        or request.args.get("link-orig")
+        or "https://google.com"
+    )
+
+    with get_db() as db:
+        customer = (
+            db.query(Customer)
+            .options(joinedload(Customer.router))
+            .filter(Customer.ip_address == ip_address)
+            .first()
+        )
+
+        if not customer:
+            return "Customer not found", 404
+
+        router = customer.router
+        today = datetime.utcnow().date()
+
+        # ✅ safe start_date
+        start_date = customer.start_date.date() if customer.start_date else today
+
+        days_used = (today - start_date).days + 1
+
+        # ✅ Allow grace only Day 31–33 (else suspend)
+        if days_used < 31 or days_used > 33:
+            customer.status = "suspended"
+            db.commit()
+            return redirect(url_for("wifi_access", ip_address=ip_address, next=next_url))
+
+        # ✅ Activate grace for today
+        customer.grace_pass_date = today
+        customer.status = "grace"
+        db.commit()
+
+        # ✅ Unblock (only if router exists)
+        if router and customer.ip_address:
+            try:
+                unblock_ip(customer.ip_address, router)
+            except Exception as e:
+                print(f"❌ MikroTik unblock failed: {e}")
+
+    # ✅ Reload wifi_access and keep next_url
+    return redirect(url_for("wifi_access", ip_address=ip_address, next=next_url))
+
+from datetime import datetime, timedelta
 
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
@@ -1056,103 +1047,103 @@ def wifi_access(ip_address):
             return "Customer not found", 404
 
         router = customer.router
-        today = datetime.now().date()
+        today = datetime.utcnow().date()
 
-        # ✅ 1) start_date + subscription_end computed in Python
         start_date = customer.start_date.date() if customer.start_date else today
         subscription_end = start_date + timedelta(days=30)
 
-        # Grace window
-        grace_days = customer.grace_days or 0
-        grace_end = subscription_end + timedelta(days=grace_days)
-
-        # ✅ 3) always compute/pass days_left
         days_used = (today - start_date).days + 1
         days_left = max((subscription_end - today).days, 0)
 
         old_status = customer.status
 
+        show_popup = False
+        popup_type = None
+        popup_message = None
+
         short_message = ""
         detailed_message = None
 
-        # ✅ 4) control popup with show_popup
-        show_popup = False
+        # ==================== DAY 1 (WELCOME ONCE) ====================
+        # show active card ONCE on day 1, then never again
+        if days_used == 1 and popup_due(getattr(customer, "welcome_popup_last_shown", None), today):
+            customer.status = "active"
+            short_message = f"Your subscription is active. Valid until {subscription_end}."
+            show_popup = True
+            popup_type = "welcome_active"
+            popup_message = "Your subscription is active. You can now start browsing."
+            customer.welcome_popup_last_shown = today
 
-        # ==================== ACTIVE ====================
-        if today <= subscription_end:
+        # ==================== DAY 1–30 (ACTIVE) ====================
+        elif days_used <= 30:
             customer.status = "active"
             short_message = f"Your subscription runs from {start_date} to {subscription_end}."
 
-            # Show popup reminders day 25–30
-            if 25 <= days_used <= 30:
+            # day 25–30 popup once per day
+            if 25 <= days_used <= 30 and popup_due(customer.pre_expiry_popup_last_shown, today):
                 show_popup = True
-                detailed_message = (
-                    f"Hi {customer.name}, your subscription will expire on "
-                    f"<strong>{subscription_end}</strong> ({days_left} day(s) left). "
-                    f"Please make payment to continue uninterrupted service."
+                popup_type = "pre_expiry"
+                popup_message = (
+                    f"Your subscription will expire on <strong>{subscription_end}</strong> "
+                    f"({days_left} day(s) left). Please make payment to continue uninterrupted service."
                 )
+                customer.pre_expiry_popup_last_shown = today
 
-        # ==================== GRACE ====================
-        elif subscription_end < today <= grace_end:
-            customer.status = "grace"
-            short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
+        # ==================== DAY 31–33 (GRACE OFFER) ====================
+        elif 31 <= days_used <= 33:
+            if customer.grace_pass_date == today:
+                customer.status = "grace"
+                short_message = "Grace activated for today. Please make payment to restore monthly service."
+            else:
+                customer.status = "suspended"
+                short_message = "Your subscription has expired."
 
-        # ==================== SUSPENDED ====================
+                if popup_due(customer.grace_offer_popup_last_shown, today):
+                    show_popup = True
+                    popup_type = "grace_offer"
+                    popup_message = (
+                        "Your subscription has expired.<br>"
+                        "Click <strong>GRACE</strong> to continue browsing for today."
+                    )
+                    customer.grace_offer_popup_last_shown = today
+
+        # ==================== DAY 34+ (SUSPENDED) ====================
         else:
             customer.status = "suspended"
-            short_message = (
-                f"Your WiFi was suspended. Subscription expired on {subscription_end} "
-                f"and grace ended on {grace_end}."
-            )
+            short_message = "You have utilised all your grace for the month. Please pay to continue enjoying the internet."
             detailed_message = f"Hi {customer.name}, your account is suspended. Contact support for help."
 
-        # Save status
         db.commit()
 
-        # MikroTik only if status changed and router exists
+        # MikroTik only when status changes
         if router and customer.status != old_status:
             try:
                 if customer.status == "suspended":
                     block_ip(customer.ip_address, router)
-                    print(f"🔒 Blocked {customer.ip_address} on {router.ip_address}")
                 else:
                     unblock_ip(customer.ip_address, router)
-                    print(f"✅ Unblocked {customer.ip_address} on {router.ip_address}")
             except Exception as e:
-                print(f"⚠️ MikroTik action failed for {customer.ip_address}: {e}")
+                print(f"⚠️ MikroTik action failed: {e}")
 
-        # ✅ 2) pass subscription_end + start_date
-        # ✅ 3) always pass days_left
-        # ✅ 4) use show_popup for popup display in template
+        # ✅ YOUR RULE: If active/grace and NO popup => show nothing
+        if customer.status in ("active", "grace") and not show_popup:
+            return "", 204
+
         return render_template(
-            "wifi_home.html",
+            "customer/wifi_home.html",
             customer=customer,
             status=customer.status,
             short_message=short_message,
             detailed_message=detailed_message,
+            show_popup=show_popup,
+            popup_type=popup_type,
+            popup_message=popup_message,
             start_date=start_date,
             subscription_end=subscription_end,
-            grace_end=grace_end,
             days_left=days_left,
-            show_popup=show_popup,
             current_year=datetime.utcnow().year,
         )
 
-
-
-#============ GRACE / SUSPENDED CUSTOMERS ====================
-@app.route("/grace_customers")
-@login_required
-@roles_required("admin", "super_admin")
-def grace_customers():
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-    db = SessionLocal()
-    try:
-        grace_list = db.query(Customer).filter_by(status="grace").all()
-    finally:
-        db.close()
-    return render_template("admin/grace_customers.html", customers=grace_list)
 
 @app.route("/suspended_customers")
 @login_required
@@ -1173,24 +1164,52 @@ def suspended_customers():
 @roles_required("admin", "super_admin")
 def mark_paid(customer_id):
     with get_db() as db:
-        customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(id=customer_id).first()
+        customer = (
+            db.query(Customer)
+            .options(joinedload(Customer.router))
+            .filter_by(id=customer_id)
+            .first()
+        )
         if not customer:
             flash("Customer not found.", "danger")
             return redirect(url_for("list_customers"))
 
         router = customer.router
 
-        # Reset subscription
-        today = datetime.now().date()
-        customer.grace_days = 0
+        # ✅ restart new 30-day cycle
+        customer.start_date = datetime.utcnow()
         customer.status = "active"
-        customer.popup_shown = False
-        customer.pre_expiry_popup_shown = False
+
+        # ✅ reset manual restrictions (ONLY keep fields that exist in your model)
+        if hasattr(customer, "manually_suspended"):
+            customer.manually_suspended = False
+        if hasattr(customer, "hold_status"):
+            customer.hold_status = False
+        if hasattr(customer, "hold_until"):
+            customer.hold_until = None
+
+        # ✅ reset legacy fields (keep if still used anywhere)
+        if hasattr(customer, "grace_days"):
+            customer.grace_days = 0
+        if hasattr(customer, "popup_shown"):
+            customer.popup_shown = False
+        if hasattr(customer, "pre_expiry_popup_shown"):
+            customer.pre_expiry_popup_shown = False
+
+        # ✅ reset NEW FLOW fields
+        if hasattr(customer, "grace_pass_date"):
+            customer.grace_pass_date = None
+        if hasattr(customer, "pre_expiry_popup_last_shown"):
+            customer.pre_expiry_popup_last_shown = None
+        if hasattr(customer, "grace_offer_popup_last_shown"):
+            customer.grace_offer_popup_last_shown = None
+        if hasattr(customer, "suspended_popup_last_shown"):
+            customer.suspended_popup_last_shown = None
 
         db.commit()
 
-        # ✅ Unblock IP using helper
-        if router:
+        # ✅ unblock on MikroTik
+        if router and customer.ip_address:
             try:
                 unblock_ip(customer.ip_address, router)
                 flash(f"{customer.name} is marked paid and WiFi is active.", "success")
@@ -1438,7 +1457,11 @@ def manual_manage_customers():
         customers = db.query(Customer).all()
     return render_template('admin/manual_hold.html', customers=customers, datetime=datetime)
 
-# ==================== APScheduler Job ====================
+@app.route("/grace_customers")
+@login_required
+@roles_required("admin", "super_admin")
+def grace_customers():
+    return redirect(url_for("list_customers", status="grace"))
 
 def daily_status_check(db=None):
     """Check all customers and update WiFi status automatically (efficient)."""
@@ -1450,36 +1473,39 @@ def daily_status_check(db=None):
         close_session = True
 
     try:
-        # ✅ Load routers with customers to avoid lazy-load issues
         customers = db.query(Customer).options(joinedload(Customer.router)).all()
 
         for customer in customers:
             router = customer.router
             old_status = customer.status
 
-            # ✅ If manually suspended or on hold, scheduler should NOT override
+            # ✅ Do NOT override manual states
             if old_status in ["manually_suspended", "on_hold"]:
                 continue
 
             start_date = customer.start_date.date() if customer.start_date else today
-            subscription_end = start_date + timedelta(days=30)
+            days_used = (today - start_date).days + 1
 
-            grace_days = customer.grace_days or 0
-            grace_end = subscription_end + timedelta(days=grace_days)
-
-            # ✅ Determine new status
-            if today <= subscription_end:
+            # ================= NEW STATUS LOGIC =================
+            if days_used <= 30:
                 new_status = "active"
-            elif subscription_end < today <= grace_end:
-                new_status = "grace"
+
+            elif 31 <= days_used <= 33:
+                # user must click grace every day
+                new_status = "grace" if customer.grace_pass_date == today else "suspended"
+
             else:
                 new_status = "suspended"
 
-            # ✅ Update DB status
+            # ✅ Step 6B: clear grace click when active again
+            if new_status == "active":
+                customer.grace_pass_date = None
+
+            # ================= APPLY STATUS =================
             customer.status = new_status
 
-            # ✅ MikroTik action only if status changed
-            if router and new_status != old_status:
+            # ✅ MikroTik only if status changed
+            if router and customer.ip_address and new_status != old_status:
                 try:
                     if new_status == "suspended":
                         block_ip(customer.ip_address, router)
@@ -1488,7 +1514,7 @@ def daily_status_check(db=None):
                         unblock_ip(customer.ip_address, router)
                         print(f"✅ Scheduler unblocked {customer.ip_address} on {router.ip_address}")
                 except Exception as e:
-                    print(f"⚠️ Scheduler MikroTik error for {customer.ip_address} on {router.ip_address}: {e}")
+                    print(f"⚠️ Scheduler MikroTik error for {customer.ip_address}: {e}")
 
         db.commit()
 
@@ -1496,16 +1522,13 @@ def daily_status_check(db=None):
         if close_session:
             db.close()
 
-
-
-
 # ==================== SCHEDULER SETUP ====================
 # For testing: run every 5 minutes
 scheduler.add_job(
     id="daily_status_check_test",
     func=daily_status_check,
     trigger="interval",
-    minutes=5,
+    minutes=2,
     replace_existing=True
 )
 
@@ -1525,7 +1548,7 @@ scheduler.add_job(
 if __name__ == "__main__":
  
     if not scheduler.running:
-     scheduler.start()
+        scheduler.start()
 
     print("Scheduler started successfully.")
 

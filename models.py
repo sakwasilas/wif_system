@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from connections import Base
 
@@ -22,8 +22,7 @@ class Branch(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(100), unique=True, nullable=False)
-    
-    # One branch -> many routers
+
     routers = relationship(
         "Router",
         back_populates="branch",
@@ -40,14 +39,12 @@ class Router(Base):
     description = Column(String(255))
     branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False)
 
-    # ===== New fields for MikroTik API =====
     username = Column(String(50), nullable=False, default="admin")
-    password = Column(String(100), nullable=False)  # store hashed if needed
-    port = Column(Integer, default=8728)            # API port, default 8728
+    password = Column(String(100), nullable=False)
+    port = Column(Integer, default=8728)
 
     branch = relationship("Branch", back_populates="routers")
 
-    # One router -> many customers
     customers = relationship(
         "Customer",
         back_populates="router",
@@ -55,6 +52,7 @@ class Router(Base):
     )
 
 
+# ==================== CUSTOMER MODEL ====================
 class Customer(Base):
     __tablename__ = "customers"
 
@@ -65,8 +63,11 @@ class Customer(Base):
     ip_address = Column(String(50), nullable=False)
     location = Column(String(255))
     billing_amount = Column(Float, nullable=False)
+
     start_date = Column(DateTime, nullable=True)
     contract_date = Column(DateTime, nullable=True)
+
+    # Legacy fields (keep)
     grace_days = Column(Integer, default=0)
     status = Column(String(50), default="active")
     popup_shown = Column(Boolean, default=False)
@@ -78,12 +79,29 @@ class Customer(Base):
     manually_suspended = Column(Boolean, default=False)
     hold_status = Column(Boolean, default=False)
     activated_on = Column(DateTime, nullable=True)
-    hold_until = Column(DateTime, nullable=True)  # 👈 New field
+    hold_until = Column(DateTime, nullable=True)
 
     router_id = Column(Integer, ForeignKey("routers.id"))
-
     router = relationship("Router", back_populates="customers")
-    network = relationship("CustomerNetwork", back_populates="customer", uselist=False, cascade="all, delete-orphan")
+    welcome_popup_last_shown = Column(Date, nullable=True)
+
+    network = relationship(
+        "CustomerNetwork",
+        back_populates="customer",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+    # ==================== NEW FIELDS (YOUR NEW FLOW) ====================
+
+    # ✅ Daily GRACE: user must click on day 31/32/33 to browse THAT DAY
+    grace_pass_date = Column(Date, nullable=True)
+
+    # ✅ prevent popup spamming (show once per day)
+    pre_expiry_popup_last_shown = Column(Date, nullable=True)   # day 25–30
+    grace_offer_popup_last_shown = Column(Date, nullable=True)  # day 31–33
+    suspended_popup_last_shown = Column(Date, nullable=True)    # optional
+
 
 # ==================== CUSTOMER NETWORK MODEL ====================
 class CustomerNetwork(Base):
@@ -103,5 +121,4 @@ class CustomerNetwork(Base):
     power_level = Column(String(50))
     coordinates = Column(String(255))
 
-    # Back reference to customer
     customer = relationship("Customer", back_populates="network")
