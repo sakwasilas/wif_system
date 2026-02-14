@@ -84,6 +84,7 @@ class Customer(Base):
     router_id = Column(Integer, ForeignKey("routers.id"))
     router = relationship("Router", back_populates="customers")
     welcome_popup_last_shown = Column(Date, nullable=True)
+    active_card_cycle_start = Column(Date, nullable=True)
 
     network = relationship(
         "CustomerNetwork",

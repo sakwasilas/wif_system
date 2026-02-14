@@ -1032,10 +1032,11 @@ def activate_grace(ip_address):
     # ✅ Reload wifi_access and keep next_url
     return redirect(url_for("wifi_access", ip_address=ip_address, next=next_url))
 
-from datetime import datetime, timedelta
-
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
+    # ✅ must be INSIDE the route
+    next_url = request.args.get("next") or "https://google.com"
+
     with get_db() as db:
         customer = (
             db.query(Customer)
@@ -1057,27 +1058,26 @@ def wifi_access(ip_address):
 
         old_status = customer.status
 
+        # popup vars
         show_popup = False
         popup_type = None
         popup_message = None
 
+        # ✅ show active card once per billing cycle
+        show_active_card = False
+
         short_message = ""
         detailed_message = None
 
-        # ==================== DAY 1 (WELCOME ONCE) ====================
-        # show active card ONCE on day 1, then never again
-        if days_used == 1 and popup_due(getattr(customer, "welcome_popup_last_shown", None), today):
-            customer.status = "active"
-            short_message = f"Your subscription is active. Valid until {subscription_end}."
-            show_popup = True
-            popup_type = "welcome_active"
-            popup_message = "Your subscription is active. You can now start browsing."
-            customer.welcome_popup_last_shown = today
-
         # ==================== DAY 1–30 (ACTIVE) ====================
-        elif days_used <= 30:
+        if days_used <= 30:
             customer.status = "active"
             short_message = f"Your subscription runs from {start_date} to {subscription_end}."
+
+            # ✅ show ACTIVE card only once per cycle
+            if customer.active_card_cycle_start != start_date:
+                show_active_card = True
+                customer.active_card_cycle_start = start_date
 
             # day 25–30 popup once per day
             if 25 <= days_used <= 30 and popup_due(customer.pre_expiry_popup_last_shown, today):
@@ -1110,8 +1110,8 @@ def wifi_access(ip_address):
         # ==================== DAY 34+ (SUSPENDED) ====================
         else:
             customer.status = "suspended"
-            short_message = "You have utilised all your grace for the month. Please pay to continue enjoying the internet."
-            detailed_message = f"Hi {customer.name}, your account is suspended. Contact support for help."
+            short_message = " Please pay to continue enjoying the internet."
+            detailed_message = f"Hi {customer.name}, :Contact support for help."
 
         db.commit()
 
@@ -1125,8 +1125,8 @@ def wifi_access(ip_address):
             except Exception as e:
                 print(f"⚠️ MikroTik action failed: {e}")
 
-        # ✅ YOUR RULE: If active/grace and NO popup => show nothing
-        if customer.status in ("active", "grace") and not show_popup:
+        # ✅ If ACTIVE/GRACE and NO popup and NO active-card -> return nothing (blank)
+        if customer.status in ("active", "grace") and (not show_popup) and (not show_active_card):
             return "", 204
 
         return render_template(
@@ -1138,12 +1138,13 @@ def wifi_access(ip_address):
             show_popup=show_popup,
             popup_type=popup_type,
             popup_message=popup_message,
+            show_active_card=show_active_card,
             start_date=start_date,
             subscription_end=subscription_end,
             days_left=days_left,
+            next_url=next_url,   # ✅ now defined
             current_year=datetime.utcnow().year,
         )
-
 
 @app.route("/suspended_customers")
 @login_required
@@ -1179,6 +1180,7 @@ def mark_paid(customer_id):
         # ✅ restart new 30-day cycle
         customer.start_date = datetime.utcnow()
         customer.status = "active"
+        customer.active_card_cycle_start = None
 
         # ✅ reset manual restrictions (ONLY keep fields that exist in your model)
         if hasattr(customer, "manually_suspended"):
@@ -1523,24 +1525,24 @@ def daily_status_check(db=None):
             db.close()
 
 # ==================== SCHEDULER SETUP ====================
-# For testing: run every 5 minutes
-scheduler.add_job(
-    id="daily_status_check_test",
-    func=daily_status_check,
-    trigger="interval",
-    minutes=2,
-    replace_existing=True
-)
-
-# For production: uncomment this line to run once daily at midnight UTC
+# # For testing: run every 5 minutes
 # scheduler.add_job(
-#     id="daily_status_check_daily",
+#     id="daily_status_check_test",
 #     func=daily_status_check,
-#     trigger="cron",
-#     hour=0,
-#     minute=0,
+#     trigger="interval",
+#     minutes=,
 #     replace_existing=True
 # )
+
+# For production: uncomment this line to run once daily at midnight UTC
+scheduler.add_job(
+    id="daily_status_check_daily",
+    func=daily_status_check,
+    trigger="cron",
+    hour=0,
+    minute=0,
+    replace_existing=True
+)
 
 
 # ==================== RUN APP ====================

@@ -1040,61 +1040,94 @@ def grace_popup(ip_address):
         return render_template("customer/grace_popup.html", customer=customer)
 
 
+def popup_due(last_shown_date, today):
+    """Return True if popup was not shown today."""
+    return (last_shown_date is None) or (last_shown_date != today)
+
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
+    # ✅ MUST be inside route (request context exists here)
+    next_url = request.args.get("next") or "https://google.com"
+
     with get_db() as db:
-        customer = db.query(Customer).options(joinedload(Customer.router)).filter_by(ip_address=ip_address).first()
+        customer = (
+            db.query(Customer)
+            .options(joinedload(Customer.router))
+            .filter_by(ip_address=ip_address)
+            .first()
+        )
         if not customer:
             return "Customer not found", 404
 
         router = customer.router
         today = datetime.utcnow().date()
 
+        # ✅ Start date
         start_date = customer.start_date.date() if customer.start_date else today
         subscription_end = start_date + timedelta(days=30)
-
-        grace_days = customer.grace_days or 0
-        grace_end = subscription_end + timedelta(days=grace_days)
 
         days_used = (today - start_date).days + 1
         days_left = max((subscription_end - today).days, 0)
 
-        # ✅ Track old status so we only call MikroTik when it changes
         old_status = customer.status
 
+        # popup vars
         show_popup = False
-        short_message = None
+        popup_type = None
+        popup_message = None
+
+        # ✅ show active card once per cycle
+        show_active_card = False
+
+        short_message = ""
         detailed_message = None
 
-        # ==================== ACTIVE ====================
-        if today <= subscription_end:
+        # ==================== DAY 1–30 (ACTIVE) ====================
+        if days_used <= 30:
             customer.status = "active"
             short_message = f"Your subscription runs from {start_date} to {subscription_end}."
 
-            # ✅ Daily notifications day 25–30
-            if 25 <= days_used <= 30:
+            # ✅ show ACTIVE card only once per cycle
+            if customer.active_card_cycle_start != start_date:
+                show_active_card = True
+                customer.active_card_cycle_start = start_date
+
+            # ✅ day 25–30 popup once per day
+            if 25 <= days_used <= 30 and popup_due(customer.pre_expiry_popup_last_shown, today):
                 show_popup = True
-                detailed_message = (
-                    f"Hi {customer.name}, your subscription will expire on "
-                    f"<strong>{subscription_end}</strong> ({days_left} day(s) left). "
-                    f"Please make payment to continue uninterrupted service."
+                popup_type = "pre_expiry"
+                popup_message = (
+                    f"Your subscription will expire on <strong>{subscription_end}</strong> "
+                    f"({days_left} day(s) left). Please make payment to continue uninterrupted service."
                 )
+                customer.pre_expiry_popup_last_shown = today
 
-        # ==================== GRACE ====================
-        elif subscription_end < today <= grace_end:
-            customer.status = "grace"
-            short_message = f"Your subscription expired on {subscription_end}. Please pay before {grace_end}."
+        # ==================== DAY 31–33 (GRACE OFFER) ====================
+        elif 31 <= days_used <= 33:
+            # ✅ if clicked grace today, user is in grace today
+            if customer.grace_pass_date == today:
+                customer.status = "grace"
+                short_message = "Grace activated for today. Please make payment to restore monthly service."
+            else:
+                customer.status = "suspended"
+                short_message = "Your subscription has expired."
 
-        # ==================== SUSPENDED ====================
+                # ✅ show grace button popup once per day
+                if popup_due(customer.grace_offer_popup_last_shown, today):
+                    show_popup = True
+                    popup_type = "grace_offer"
+                    popup_message = (
+                        "Your subscription has expired.<br>"
+                        "Click <strong>GRACE</strong> to continue browsing for today."
+                    )
+                    customer.grace_offer_popup_last_shown = today
+
+        # ==================== DAY 34+ (SUSPENDED) ====================
         else:
             customer.status = "suspended"
-            short_message = (
-                f"Your WiFi was suspended. Subscription expired on {subscription_end} "
-                f"and grace ended on {grace_end}."
-            )
+            short_message = "You have utilised all your grace for the month. Please pay to continue enjoying the internet."
             detailed_message = f"Hi {customer.name}, your account is suspended. Contact support for help."
 
-        # ✅ Save status update
         db.commit()
 
         # ✅ MikroTik action ONLY if status changed
@@ -1102,23 +1135,31 @@ def wifi_access(ip_address):
             try:
                 if customer.status == "suspended":
                     block_ip(customer.ip_address, router)
-                    print(f"🔒 {customer.name} ({customer.ip_address}) blocked on {router.ip_address}")
                 else:
                     unblock_ip(customer.ip_address, router)
-                    print(f"✅ {customer.name} ({customer.ip_address}) unblocked on {router.ip_address}")
             except Exception as e:
-                print(f"⚠️ MikroTik action failed for {customer.ip_address} on {router.ip_address}: {e}")
+                print(f"⚠️ MikroTik action failed: {e}")
+
+        # ✅ If ACTIVE/GRACE and no popup and no active-card -> return blank
+        # (Your browser/captive portal script will continue to next page)
+        if customer.status in ("active", "grace") and (not show_popup) and (not show_active_card):
+            return "", 204
 
         return render_template(
-            "wifi_home.html",
+            "wifi_home.html",   # or "customer/wifi_home.html" depending on your folder
             customer=customer,
             status=customer.status,
             short_message=short_message,
             detailed_message=detailed_message,
-            days_left=days_left if show_popup else None,
+            days_left=days_left,
             show_popup=show_popup,
+            popup_type=popup_type,
+            popup_message=popup_message,
+            show_active_card=show_active_card,
+            start_date=start_date,
+            subscription_end=subscription_end,
+            next_url=next_url,  # ✅ template uses this to redirect after card hides
             current_year=datetime.utcnow().year,
-            timedelta=timedelta  # ✅ important because your template uses timedelta
         )
 
 

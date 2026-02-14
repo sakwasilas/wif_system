@@ -1,19 +1,16 @@
 {% extends "base.html" %}
-
 {% block content %}
-<div class="container d-flex justify-content-center align-items-center" style="min-height: 90vh;">
 
+<div class="container d-flex justify-content-center align-items-center" style="min-height: 90vh;">
   <div id="main-card" class="card shadow-lg border-0"
        style="width: 100%; max-width: 600px; background-color: #f8f9fa;">
 
-    <!-- HEADER -->
     <div class="card-header text-white
       {% if status == 'active' %}bg-success
       {% elif status == 'grace' %}bg-warning
       {% elif status == 'suspended' %}bg-danger
       {% else %}bg-secondary
       {% endif %}">
-
       <div class="text-center">
         <h4 class="mb-1">Intersurf Cable Ltd - {{ customer.name }}</h4>
 
@@ -27,36 +24,66 @@
       </div>
     </div>
 
-    <!-- BODY -->
     <div class="card-body text-center">
       <p class="fw-bold">{{ short_message }}</p>
 
       {% if start_date and subscription_end %}
-      <p>
-        Valid from <strong>{{ start_date }}</strong>
-        to <strong>{{ subscription_end }}</strong>.
-      </p>
+        <p>Valid from <strong>{{ start_date }}</strong> to <strong>{{ subscription_end }}</strong>.</p>
       {% endif %}
     </div>
 
-    <!-- FOOTER -->
     <div class="card-footer text-center text-muted">
       © {{ current_year }} Intersurf Cable Ltd
     </div>
-
   </div>
 </div>
 
-<!-- AUTO HIDE AFTER 5 SECONDS -->
+{# ✅ POPUP AREA (this is where GRACE button appears) #}
+{% if show_popup %}
+<div id="subscription-popup" class="popup-container">
+  <h4 class="mb-2">Hello {{ customer.name }}!</h4>
+  <p class="mb-3">{{ popup_message|safe }}</p>
+
+  {% if popup_type == "grace_offer" %}
+    <form method="POST" action="{{ url_for('activate_grace', ip_address=customer.ip_address, next=next_url) }}">
+      <button type="submit" class="btn btn-warning w-100 fw-bold">
+        GRACE (Continue Today)
+      </button>
+    </form>
+    <small class="text-muted d-block mt-2">Grace must be clicked daily (Day 31–33).</small>
+  {% else %}
+    <button class="btn btn-secondary w-100" onclick="document.getElementById('subscription-popup').style.display='none'">
+      Close
+    </button>
+  {% endif %}
+</div>
+{% endif %}
+
+<style>
+.popup-container{
+  position:fixed; top:20%; left:50%; transform:translateX(-50%);
+  background:#fff; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,.3);
+  padding:25px; text-align:center; z-index:9999; width:92%; max-width:420px;
+}
+</style>
+
 <script>
 window.addEventListener('DOMContentLoaded', () => {
-    const card = document.getElementById('main-card');
+  const card  = document.getElementById('main-card');
+  const popup = document.getElementById('subscription-popup');
 
-    {% if status in ["active", "grace"] %}
-    setTimeout(() => {
-        if (card) card.style.display = 'none';
-    }, 5000);
-    {% endif %}
+  // ✅ ACTIVE card once per cycle -> hide then redirect to Google (next_url)
+  {% if show_active_card %}
+  setTimeout(() => {
+    if (card) card.style.display = 'none';
+    window.location.href = "{{ next_url }}";
+  }, 5000);
+  {% endif %}
+
+  // ✅ Optional: auto-hide non-grace popups
+  {% if show_popup and popup_type != "grace_offer" %}
+  if (popup) setTimeout(() => popup.style.display = 'none', 8000);
+  {% endif %}
 });
 </script>
 
