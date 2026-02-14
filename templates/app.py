@@ -1162,6 +1162,49 @@ def wifi_access(ip_address):
             current_year=datetime.utcnow().year,
         )
 
+@app.route("/activate_grace/<ip_address>", methods=["POST"])
+def activate_grace(ip_address):
+    # where to send the user after grace is activated
+    next_url = request.args.get("next") or "https://google.com"
+
+    with get_db() as db:
+        customer = (
+            db.query(Customer)
+            .options(joinedload(Customer.router))
+            .filter_by(ip_address=ip_address)
+            .first()
+        )
+        if not customer:
+            return "Customer not found", 404
+
+        router = customer.router
+        today = datetime.utcnow().date()
+
+        # calculate days_used (same logic as wifi_access)
+        start_date = customer.start_date.date() if customer.start_date else today
+        days_used = (today - start_date).days + 1
+
+        # ✅ Allow GRACE only Day 31–33
+        if not (31 <= days_used <= 33):
+            # if they try outside grace days, just go back to wifi_access page
+            return redirect(url_for("wifi_access", ip_address=ip_address, next=next_url))
+
+        # ✅ Activate grace for TODAY
+        customer.grace_pass_date = today
+        customer.status = "grace"
+        db.commit()
+
+        # ✅ Unblock on MikroTik so the user can browse
+        if router:
+            try:
+                unblock_ip(customer.ip_address, router)
+            except Exception as e:
+                print(f"⚠️ MikroTik unblock failed: {e}")
+
+    # ✅ After clicking GRACE, send them to the next_url (google)
+    return redirect(next_url)
+
+
 
 #============ GRACE / SUSPENDED CUSTOMERS ====================
 @app.route("/grace_customers")

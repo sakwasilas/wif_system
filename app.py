@@ -35,7 +35,7 @@ scheduler = APScheduler()
 
 # APScheduler config (safe defaults)
 app.config["SCHEDULER_API_ENABLED"] = False
-app.config["SCHEDULER_TIMEZONE"] = "UTC"
+app.config["SCHEDULER_TIMEZONE"] = "Africa/Nairobi"
 
 scheduler.init_app(app)
 
@@ -981,56 +981,61 @@ def grace_popup(ip_address):
 
         return render_template("customer/grace_popup.html", customer=customer)
 
-@app.route("/activate_grace/<path:ip_address>", methods=["POST"])
+from flask import Response
+
+@app.route("/activate_grace/<ip_address>", methods=["GET", "POST"])
 def activate_grace(ip_address):
-    # ✅ get next url from query string (passed from the form action)
-    next_url = (
-        request.args.get("next")
-        or request.form.get("next")
-        or request.args.get("dst")
-        or request.args.get("link-orig")
-        or "https://google.com"
-    )
+    next_url = request.args.get("next") or "https://google.com"
 
     with get_db() as db:
         customer = (
             db.query(Customer)
             .options(joinedload(Customer.router))
-            .filter(Customer.ip_address == ip_address)
+            .filter_by(ip_address=ip_address)
             .first()
         )
-
         if not customer:
             return "Customer not found", 404
 
-        router = customer.router
         today = datetime.utcnow().date()
-
-        # ✅ safe start_date
         start_date = customer.start_date.date() if customer.start_date else today
-
         days_used = (today - start_date).days + 1
 
-        # ✅ Allow grace only Day 31–33 (else suspend)
-        if days_used < 31 or days_used > 33:
+        # ✅ Only allow grace Day 31–33
+        if not (31 <= days_used <= 33):
             customer.status = "suspended"
             db.commit()
-            return redirect(url_for("wifi_access", ip_address=ip_address, next=next_url))
+        else:
+            customer.grace_pass_date = today
+            customer.status = "grace"
+            db.commit()
 
-        # ✅ Activate grace for today
-        customer.grace_pass_date = today
-        customer.status = "grace"
-        db.commit()
+            # ✅ Unblock on MikroTik (optional)
+            router = customer.router
+            if router:
+                try:
+                    unblock_ip(customer.ip_address, router)
+                except Exception as e:
+                    print(f"⚠️ MikroTik unblock failed: {e}")
 
-        # ✅ Unblock (only if router exists)
-        if router and customer.ip_address:
-            try:
-                unblock_ip(customer.ip_address, router)
-            except Exception as e:
-                print(f"❌ MikroTik unblock failed: {e}")
+    # ✅ IMPORTANT: captive portals sometimes ignore 302 redirects
+    # So we return a small HTML page that forces redirect.
+    html = f"""
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta http-equiv="refresh" content="0;url={next_url}">
+      <script>window.location.replace("{next_url}");</script>
+    </head>
+    <body>
+      Redirecting...
+      <a href="{next_url}">Continue</a>
+    </body>
+    </html>
+    """
+    return Response(html, mimetype="text/html")
 
-    # ✅ Reload wifi_access and keep next_url
-    return redirect(url_for("wifi_access", ip_address=ip_address, next=next_url))
 
 @app.route("/wifi_access/<ip_address>")
 def wifi_access(ip_address):
@@ -1079,7 +1084,7 @@ def wifi_access(ip_address):
                 show_active_card = True
                 customer.active_card_cycle_start = start_date
 
-            # day 25–30 popup once per day
+            # ✅ day 25–30 popup once per day
             if 25 <= days_used <= 30 and popup_due(customer.pre_expiry_popup_last_shown, today):
                 show_popup = True
                 popup_type = "pre_expiry"
@@ -1098,6 +1103,7 @@ def wifi_access(ip_address):
                 customer.status = "suspended"
                 short_message = "Your subscription has expired."
 
+                # ✅ show grace button popup once per day
                 if popup_due(customer.grace_offer_popup_last_shown, today):
                     show_popup = True
                     popup_type = "grace_offer"
@@ -1110,12 +1116,12 @@ def wifi_access(ip_address):
         # ==================== DAY 34+ (SUSPENDED) ====================
         else:
             customer.status = "suspended"
-            short_message = " Please pay to continue enjoying the internet."
-            detailed_message = f"Hi {customer.name}, :Contact support for help."
+            short_message = "You have utilised all your grace for the month. Please pay to continue enjoying the internet."
+            detailed_message = f"Hi {customer.name}, your account is suspended. Contact support for help."
 
         db.commit()
 
-        # MikroTik only when status changes
+        # ✅ MikroTik only when status changes
         if router and customer.status != old_status:
             try:
                 if customer.status == "suspended":
@@ -1125,8 +1131,12 @@ def wifi_access(ip_address):
             except Exception as e:
                 print(f"⚠️ MikroTik action failed: {e}")
 
-        # ✅ If ACTIVE/GRACE and NO popup and NO active-card -> return nothing (blank)
+        # ✅ IMPORTANT CHANGE:
+        # If ACTIVE/GRACE and NO popup and NO active-card -> redirect to next_url (google)
         if customer.status in ("active", "grace") and (not show_popup) and (not show_active_card):
+            # ✅ avoid loop if next_url mistakenly points back to wifi_access
+            if next_url and "wifi_access" not in next_url:
+                return redirect(next_url)
             return "", 204
 
         return render_template(
@@ -1142,7 +1152,7 @@ def wifi_access(ip_address):
             start_date=start_date,
             subscription_end=subscription_end,
             days_left=days_left,
-            next_url=next_url,   # ✅ now defined
+            next_url=next_url,
             current_year=datetime.utcnow().year,
         )
 
@@ -1526,23 +1536,23 @@ def daily_status_check(db=None):
 
 # ==================== SCHEDULER SETUP ====================
 # # For testing: run every 5 minutes
-# scheduler.add_job(
-#     id="daily_status_check_test",
-#     func=daily_status_check,
-#     trigger="interval",
-#     minutes=,
-#     replace_existing=True
-# )
+scheduler.add_job(
+    id="daily_status_check_test",
+    func=daily_status_check,
+    trigger="interval",
+    minutes=2,
+    replace_existing=True
+ )
 
 # For production: uncomment this line to run once daily at midnight UTC
-scheduler.add_job(
-    id="daily_status_check_daily",
-    func=daily_status_check,
-    trigger="cron",
-    hour=0,
-    minute=0,
-    replace_existing=True
-)
+# scheduler.add_job(
+#     id="daily_status_check_daily",
+#     func=daily_status_check,
+#     trigger="cron",
+#     hour=0,
+#     minute=0,
+#     replace_existing=True
+# )
 
 
 # ==================== RUN APP ====================

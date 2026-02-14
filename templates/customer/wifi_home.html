@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 
+{# ✅ Hide the big card ONLY when grace offer popup is showing #}
+{% if not (show_popup and popup_type == "grace_offer") %}
 <div class="container d-flex justify-content-center align-items-center" style="min-height: 90vh;">
   <div id="main-card" class="card shadow-lg border-0"
        style="width: 100%; max-width: 600px; background-color: #f8f9fa;">
@@ -37,25 +39,22 @@
     </div>
   </div>
 </div>
+{% endif %}
 
-{# ✅ POPUP AREA (this is where GRACE button appears) #}
+{# ✅ POPUP AREA (GRACE button appears here) #}
 {% if show_popup %}
 <div id="subscription-popup" class="popup-container">
   <h4 class="mb-2">Hello {{ customer.name }}!</h4>
   <p class="mb-3">{{ popup_message|safe }}</p>
 
   {% if popup_type == "grace_offer" %}
-    <form method="POST" action="{{ url_for('activate_grace', ip_address=customer.ip_address, next=next_url) }}">
-      <button type="submit" class="btn btn-warning w-100 fw-bold">
-        GRACE (Continue Today)
-      </button>
-    </form>
-    <small class="text-muted d-block mt-2">Grace must be clicked daily (Day 31–33).</small>
-  {% else %}
-    <button class="btn btn-secondary w-100" onclick="document.getElementById('subscription-popup').style.display='none'">
-      Close
-    </button>
-  {% endif %}
+  <a class="btn btn-warning w-100 fw-bold"
+     href="{{ url_for('activate_grace', ip_address=customer.ip_address) }}?next={{ next_url|urlencode }}">
+     GRACE (Continue Today)
+  </a>
+  <small class="text-muted d-block mt-2">Grace must be clicked daily (Day 31–33).</small>
+{% endif %}
+
 </div>
 {% endif %}
 
@@ -80,9 +79,19 @@ window.addEventListener('DOMContentLoaded', () => {
   }, 5000);
   {% endif %}
 
-  // ✅ Optional: auto-hide non-grace popups
+  // ✅ If grace popup only, make page clean (optional)
+  {% if show_popup and popup_type == "grace_offer" %}
+    document.body.style.background = "#fff";
+  {% endif %}
+
+  // ✅ Optional: auto-hide non-grace popups then redirect
   {% if show_popup and popup_type != "grace_offer" %}
-  if (popup) setTimeout(() => popup.style.display = 'none', 8000);
+  if (popup) {
+    setTimeout(() => {
+      popup.style.display = 'none';
+      window.location.href = "{{ next_url }}";
+    }, 8000);
+  }
   {% endif %}
 });
 </script>
