@@ -57,32 +57,33 @@ class Customer(Base):
     __tablename__ = "customers"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False)
-    phone = Column(String(50), nullable=False)
-    email = Column(String(255))
-    ip_address = Column(String(50), nullable=False)
-    location = Column(String(255))
-    billing_amount = Column(Float, nullable=False)
+    name = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    email = Column(String(255), nullable=True)
+    ip_address = Column(String(50), nullable=True)
+    location = Column(String(255), nullable=True)
+    billing_amount = Column(Float, nullable=True)
 
     start_date = Column(DateTime, nullable=True)
     contract_date = Column(DateTime, nullable=True)
 
     # Legacy fields (keep)
-    grace_days = Column(Integer, default=0)
-    status = Column(String(50), default="active")
-    popup_shown = Column(Boolean, default=False)
-    pre_expiry_popup_shown = Column(Boolean, default=False)
+    grace_days = Column(Integer, default=0, nullable=True)
+    status = Column(String(50), default="active", nullable=True)
+    popup_shown = Column(Boolean, default=False, nullable=True)
+    pre_expiry_popup_shown = Column(Boolean, default=False, nullable=True)
 
-    account_no = Column(String(50), nullable=False, unique=True)
-    mikrotik_password = Column(String(100))
+    account_no = Column(String(50), unique=True, nullable=True)
+    mikrotik_password = Column(String(100), nullable=True)
 
-    manually_suspended = Column(Boolean, default=False)
-    hold_status = Column(Boolean, default=False)
+    manually_suspended = Column(Boolean, default=False, nullable=True)
+    hold_status = Column(Boolean, default=False, nullable=True)
     activated_on = Column(DateTime, nullable=True)
     hold_until = Column(DateTime, nullable=True)
 
-    router_id = Column(Integer, ForeignKey("routers.id"))
+    router_id = Column(Integer, ForeignKey("routers.id"), nullable=True)
     router = relationship("Router", back_populates="customers")
+
     welcome_popup_last_shown = Column(Date, nullable=True)
     active_card_cycle_start = Column(Date, nullable=True)
 
