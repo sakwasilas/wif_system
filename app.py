@@ -602,7 +602,7 @@ def import_customers():
                 account_no=to_str(row.get("account_no")),
                 name=to_str(row.get("customer_name")),
                 phone=to_str(row.get("phone")),
-                email=to_str(row.get("email")),
+                fat_id=to_str(row.get("fat_id")),
                 ip_address=customer_ip,
                 location=to_str(row.get("location")),
                 billing_amount=to_float(row.get("billing_amount")),
@@ -699,7 +699,7 @@ def add_customer():
                 account_no=to_str(request.form.get("account_no")),
                 name=to_str(request.form.get("name")),
                 phone=to_str(request.form.get("phone")),
-                email=to_str(request.form.get("email")),
+                fat_id=to_str(request.form.get("fat_id")),
                 location=to_str(request.form.get("location")),
                 ip_address=to_str(request.form.get("ip_address")),
                 billing_amount=to_float(request.form.get("billing_amount")),
@@ -740,22 +740,67 @@ def add_customer():
 
 
 # ==================== LIST / EDIT / DELETE CUSTOMERS ====================
+# @app.route("/customers")
+# @login_required
+# @roles_required("admin", "super_admin")
+# def list_customers():
+#     search_term = request.args.get("search", "").strip()
+#     status_filter = request.args.get("status", "").strip()  # ✅ NEW
+#     page = int(request.args.get("page", 1))
+#     per_page = 2000
+
+#     with get_db() as db:
+#         query = db.query(Customer).options(
+#             joinedload(Customer.network),
+#             joinedload(Customer.router).joinedload(Router.branch)
+#         )
+
+#         # ✅ Search filter
+#         if search_term:
+#             query = query.filter(
+#                 (Customer.account_no.ilike(f"%{search_term}%")) |
+#                 (Customer.name.ilike(f"%{search_term}%")) |
+#                 (Customer.ip_address.ilike(f"%{search_term}%"))
+#             )
+
+#         # ✅ Status filter (pending_router, active, grace, suspended, etc.)
+#         if status_filter:
+#             query = query.filter(Customer.status == status_filter)
+
+#         total = query.count()
+#         customers = query.offset((page - 1) * per_page).limit(per_page).all()
+#         has_next = total > page * per_page
+
+#     return render_template(
+#         "admin/list_customer.html",
+#         customers=customers,
+#         page=page,
+#         per_page=per_page,
+#         total=total,
+#         has_next=has_next,
+#         search_term=search_term,
+#         status_filter=status_filter  # ✅ optional for UI highlighting
+#     )
+
 @app.route("/customers")
 @login_required
 @roles_required("admin", "super_admin")
 def list_customers():
     search_term = request.args.get("search", "").strip()
-    status_filter = request.args.get("status", "").strip()  # ✅ NEW
+    status_filter = request.args.get("status", "").strip()
     page = int(request.args.get("page", 1))
     per_page = 2000
 
     with get_db() as db:
+        # ✅ needed by the template
+        branches = db.query(Branch).order_by(Branch.name.asc()).all()
+        routers = db.query(Router).options(joinedload(Router.branch)).order_by(Router.ip_address.asc()).all()
+
         query = db.query(Customer).options(
             joinedload(Customer.network),
             joinedload(Customer.router).joinedload(Router.branch)
         )
 
-        # ✅ Search filter
         if search_term:
             query = query.filter(
                 (Customer.account_no.ilike(f"%{search_term}%")) |
@@ -763,7 +808,6 @@ def list_customers():
                 (Customer.ip_address.ilike(f"%{search_term}%"))
             )
 
-        # ✅ Status filter (pending_router, active, grace, suspended, etc.)
         if status_filter:
             query = query.filter(Customer.status == status_filter)
 
@@ -774,13 +818,102 @@ def list_customers():
     return render_template(
         "admin/list_customer.html",
         customers=customers,
+        branches=branches,   # ✅ NEW
+        routers=routers,     # ✅ NEW
         page=page,
         per_page=per_page,
         total=total,
         has_next=has_next,
         search_term=search_term,
-        status_filter=status_filter  # ✅ optional for UI highlighting
+        status_filter=status_filter
     )
+
+@app.route("/customers/quick_add_branch", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def quick_add_branch():
+    name = (request.form.get("name") or "").strip()
+
+    if not name:
+        flash("Branch name cannot be empty", "warning")
+        return redirect(url_for("list_customers"))
+
+    with get_db() as db:
+        existing = db.query(Branch).filter(Branch.name.ilike(name)).first()
+        if existing:
+            flash("Branch already exists", "warning")
+            return redirect(url_for("list_customers"))
+
+        db.add(Branch(name=name))
+        db.commit()
+
+    flash(f"✅ Branch '{name}' added", "success")
+    return redirect(url_for("list_customers"))
+
+
+@app.route("/customers/quick_add_router", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def quick_add_router():
+    ip = (request.form.get("ip_address") or "").strip()
+    branch_id = request.form.get("branch_id")
+    description = (request.form.get("description") or "").strip()
+    username = (request.form.get("username") or "admin").strip()
+    password = (request.form.get("password") or "").strip()
+    port = int(request.form.get("port") or 8728)
+
+    if not ip or not branch_id or not password:
+        flash("Router IP, Branch and Password are required", "warning")
+        return redirect(url_for("list_customers"))
+
+    with get_db() as db:
+        if db.query(Router).filter_by(ip_address=ip).first():
+            flash("Router IP already exists!", "danger")
+            return redirect(url_for("list_customers"))
+
+        branch = db.query(Branch).filter_by(id=int(branch_id)).first()
+        if not branch:
+            flash("Selected branch not found", "danger")
+            return redirect(url_for("list_customers"))
+
+        db.add(Router(
+            ip_address=ip,
+            description=description,
+            branch_id=int(branch_id),
+            username=username,
+            password=password,
+            port=port
+        ))
+        db.commit()
+
+    flash(f"✅ Router '{ip}' added", "success")
+    return redirect(url_for("list_customers"))
+
+
+@app.route("/customers/<int:customer_id>/assign_router", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def assign_router(customer_id):
+    router_id = request.form.get("router_id")
+    router_id = int(router_id) if router_id else None
+
+    with get_db() as db:
+        customer = db.query(Customer).filter_by(id=customer_id).first()
+        if not customer:
+            flash("Customer not found", "danger")
+            return redirect(url_for("list_customers"))
+
+        customer.router_id = router_id
+
+        # ✅ optional: if was pending_router, activate once router assigned
+        if router_id and customer.status == "pending_router":
+            customer.status = "active"
+
+        db.commit()
+
+    flash("✅ Router assigned", "success")
+    return redirect(url_for("list_customers"))
+
 
 
 
@@ -820,7 +953,7 @@ def edit_customer(customer_id):
             customer.account_no = to_str(request.form.get("account_no"))
             customer.name = request.form.get("name")
             customer.phone = request.form.get("phone")
-            customer.email = request.form.get("email")
+            customer.fat_id = request.form.get("fat_id")
             customer.location = request.form.get("location")
             customer.ip_address = request.form.get("ip_address")
             customer.billing_amount = to_float(request.form.get("billing_amount"))
@@ -1258,7 +1391,7 @@ def export_customers():
         ws.title = "Customers"
 
         headers = [
-            "Account No", "Name", "Phone", "Email", "Location", "IP Address", "Branch",
+            "Account No", "Name", "Phone", "FAT/ID", "Location", "IP Address", "Branch",
             "Billing Amount", "Cable No", "Loop No", "Power Level", "Final Coordinates",
             "Coordinates", "Date Registered", "Password", "Status"
         ]
@@ -1266,7 +1399,7 @@ def export_customers():
 
         for c in customers:
             ws.append([
-                c.account_no, c.name, c.phone, c.email, c.location, c.ip_address,
+                c.account_no, c.name, c.phone, c.fat_id, c.location, c.ip_address,
                 c.router.branch.name if c.router and c.router.branch else "",
                 c.billing_amount, c.network.cable_no if c.network else "",
                 c.network.loop_no if c.network else "", c.network.power_level if c.network else "",
@@ -1331,7 +1464,7 @@ def export_customers_by_branch(branch_id):
                 c.account_no,
                 c.name,
                 c.phone,
-                c.email,
+                c.fat_id,
                 c.location,
                 c.ip_address,
                 branch.name,
@@ -1557,4 +1690,5 @@ scheduler.add_job(
 
 # ==================== RUN APP ====================
 
-
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)

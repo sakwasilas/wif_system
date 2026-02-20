@@ -59,7 +59,7 @@ class Customer(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)
-    email = Column(String(255), nullable=True)
+    fat_id = Column(String(255), nullable=True)
     ip_address = Column(String(50), nullable=True)
     location = Column(String(255), nullable=True)
     billing_amount = Column(Float, nullable=True)

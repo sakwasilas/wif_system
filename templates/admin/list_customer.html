@@ -72,6 +72,15 @@
           justify-content: flex-start;
           flex-wrap: wrap;
       }
+
+      /* ✅ make router-assign form look good on mobile */
+      .assign-router-form {
+          flex-wrap: wrap;
+          justify-content: flex-start;
+      }
+      .assign-router-form select {
+          min-width: 180px;
+      }
   }
 </style>
 
@@ -95,12 +104,79 @@
 
     <h2 class="mb-3">Customer List</h2>
 
+    <!-- ===================== QUICK ADD (NO NEED TO GO OTHER PAGES) ===================== -->
+    <div class="row g-3 mb-3">
+        <!-- Quick Add Branch -->
+        <div class="col-lg-4">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h6 class="mb-3">🏢 Quick Add Branch</h6>
+                    <form method="POST" action="{{ url_for('quick_add_branch') }}" class="d-flex gap-2">
+                        <input type="text" name="name" class="form-control" placeholder="Branch name" required>
+                        <button class="btn btn-primary" type="submit">Add</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Add Router -->
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h6 class="mb-3">📡 Quick Add Router</h6>
+                    <form method="POST" action="{{ url_for('quick_add_router') }}" class="row g-2 align-items-center">
+                        <div class="col-md-3">
+                            <input type="text" name="ip_address" class="form-control" placeholder="Router IP" required>
+                        </div>
+
+                        <div class="col-md-3">
+                            <select name="branch_id" class="form-select" required>
+                                <option value="">Select Branch</option>
+                                {% for b in branches %}
+                                  <option value="{{ b.id }}">{{ b.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="col-md-2">
+                            <input type="text" name="username" class="form-control" placeholder="Username (admin)">
+                        </div>
+
+                        <div class="col-md-2">
+                            <input type="password" name="password" class="form-control" placeholder="Password" required>
+                        </div>
+
+                        <div class="col-md-1">
+                            <input type="number" name="port" class="form-control" placeholder="8728">
+                        </div>
+
+                        <div class="col-md-1">
+                            <button class="btn btn-success w-100" type="submit">Add</button>
+                        </div>
+
+                        <div class="col-12">
+                            <input type="text" name="description" class="form-control" placeholder="Description (optional)">
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Actions -->
     <div class="mb-3 d-flex flex-wrap gap-2">
         <a href="{{ url_for('add_customer') }}" class="btn btn-primary">➕ Add Customer</a>
-        <a href="{{ url_for('add_branch') }}" class="btn btn-info text-white">🏢 Add Branch</a>
-        <a href="{{ url_for('add_router') }}" class="btn btn-warning text-dark">📡 Add Router</a>
+
+        <!-- Optional: keep these if you still want the pages -->
+        <a href="{{ url_for('add_branch') }}" class="btn btn-info text-white">🏢 Add Branch Page</a>
+        <a href="{{ url_for('add_router') }}" class="btn btn-warning text-dark">📡 Add Router Page</a>
+
         <a href="{{ url_for('export_customers', search=search_term) }}" class="btn btn-dark">⬇ Export to Excel</a>
+
+        <!-- Optional quick filter -->
+        <a href="{{ url_for('list_customers', status='pending_router') }}" class="btn btn-outline-warning">
+            Show Pending Router
+        </a>
     </div>
 
     <div class="table-responsive">
@@ -117,6 +193,10 @@
                     <th>Billing Amount</th>
                     <th>Customer IP</th>
                     <th>Router IP</th>
+
+                    <!-- ✅ NEW COLUMN -->
+                    <th>Assign Router</th>
+
                     <th>Cable No</th>
                     <th>Cable Type</th>
                     <th>Splitter</th>
@@ -138,12 +218,29 @@
                     <td data-label="Account No">{{ customer.account_no }}</td>
                     <td data-label="Name">{{ customer.name }}</td>
                     <td data-label="Phone">{{ customer.phone }}</td>
-                    <td data-label="Email">{{ customer.email }}</td>
+                    <td data-label="fat_id">{{ customer.fat_id }}</td>
                     <td data-label="Branch">{{ customer.router.branch.name if customer.router and customer.router.branch else '' }}</td>
                     <td data-label="Location">{{ customer.location }}</td>
                     <td data-label="Billing Amount">{{ customer.billing_amount }}</td>
                     <td data-label="Customer IP">{{ customer.ip_address }}</td>
                     <td data-label="Router IP">{{ customer.router.ip_address if customer.router else '' }}</td>
+
+                    <!-- ✅ Assign Router inline -->
+                    <td data-label="Assign Router">
+                        <form method="POST"
+                              action="{{ url_for('assign_router', customer_id=customer.id) }}"
+                              class="d-flex gap-2 justify-content-center assign-router-form">
+                            <select name="router_id" class="form-select form-select-sm">
+                                <option value="">-- No Router --</option>
+                                {% for r in routers %}
+                                    <option value="{{ r.id }}" {% if customer.router_id == r.id %}selected{% endif %}>
+                                        {{ r.ip_address }} ({{ r.branch.name if r.branch else '' }})
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
+                        </form>
+                    </td>
 
                     <td data-label="Cable No">{{ customer.network.cable_no if customer.network else '' }}</td>
                     <td data-label="Cable Type">{{ customer.network.cable_type if customer.network else '' }}</td>
@@ -160,6 +257,8 @@
                             <span class="badge bg-success">Active</span>
                         {% elif customer.status == "grace" %}
                             <span class="badge bg-warning">Grace</span>
+                        {% elif customer.status == "pending_router" %}
+                            <span class="badge bg-secondary">Pending Router</span>
                         {% else %}
                             <span class="badge bg-danger">Suspended</span>
                         {% endif %}
@@ -201,7 +300,8 @@ $(document).ready(function() {
         "order": [[ 0, "asc" ]],
         "lengthMenu": [5, 10, 25, 50, 100],
         "columnDefs": [
-            { "orderable": false, "targets": -1 } // Actions column not sortable
+            { "orderable": false, "targets": -1 },  // Actions not sortable
+            { "orderable": false, "targets": 10 }   // ✅ Assign Router not sortable (index may change if you reorder columns)
         ],
         "dom": 'Bfrtip',
         "buttons": [

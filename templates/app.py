@@ -665,7 +665,7 @@ def import_customers():
                 account_no=to_str(row.get("account_no")),
                 name=to_str(row.get("customer_name")),
                 phone=to_str(row.get("phone")),
-                email=to_str(row.get("email")),
+                fat_id=to_str(row.get("fat_id")),
                 ip_address=customer_ip,
                 location=to_str(row.get("location")),
                 billing_amount=to_float(row.get("billing_amount")),
@@ -808,17 +808,26 @@ def add_customer():
 @roles_required("admin", "super_admin")
 def list_customers():
     search_term = request.args.get("search", "").strip()
-    status_filter = request.args.get("status", "").strip()  # ✅ NEW
+    status_filter = request.args.get("status", "").strip()
     page = int(request.args.get("page", 1))
     per_page = 2000
 
     with get_db() as db:
+        # ✅ load branches + routers for the page UI
+        branches = db.query(Branch).order_by(Branch.name.asc()).all()
+        routers = (
+            db.query(Router)
+            .options(joinedload(Router.branch))
+            .order_by(Router.ip_address.asc())
+            .all()
+        )
+
+        # ✅ load customers
         query = db.query(Customer).options(
             joinedload(Customer.network),
             joinedload(Customer.router).joinedload(Router.branch)
         )
 
-        # ✅ Search filter
         if search_term:
             query = query.filter(
                 (Customer.account_no.ilike(f"%{search_term}%")) |
@@ -826,7 +835,6 @@ def list_customers():
                 (Customer.ip_address.ilike(f"%{search_term}%"))
             )
 
-        # ✅ Status filter (pending_router, active, grace, suspended, etc.)
         if status_filter:
             query = query.filter(Customer.status == status_filter)
 
@@ -837,13 +845,103 @@ def list_customers():
     return render_template(
         "admin/list_customer.html",
         customers=customers,
+        branches=branches,
+        routers=routers,
         page=page,
         per_page=per_page,
         total=total,
         has_next=has_next,
         search_term=search_term,
-        status_filter=status_filter  # ✅ optional for UI highlighting
+        status_filter=status_filter
     )
+
+@app.route("/customers/quick_add_branch", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def quick_add_branch():
+    name = (request.form.get("name") or "").strip()
+
+    if not name:
+        flash("Branch name cannot be empty", "warning")
+        return redirect(url_for("list_customers"))
+
+    with get_db() as db:
+        existing = db.query(Branch).filter(Branch.name.ilike(name)).first()
+        if existing:
+            flash("Branch already exists", "warning")
+            return redirect(url_for("list_customers"))
+
+        db.add(Branch(name=name))
+        db.commit()
+
+    flash(f"✅ Branch '{name}' added", "success")
+    return redirect(url_for("list_customers"))
+
+@app.route("/customers/quick_add_router", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def quick_add_router():
+    ip = (request.form.get("ip_address") or "").strip()
+    branch_id = request.form.get("branch_id")
+    description = (request.form.get("description") or "").strip()
+    username = (request.form.get("username") or "admin").strip()
+    password = (request.form.get("password") or "").strip()
+    port = int(request.form.get("port") or 8728)
+
+    # Required validation
+    if not ip or not branch_id or not password:
+        flash("Router IP, Branch and Password are required", "warning")
+        return redirect(url_for("list_customers"))
+
+    with get_db() as db:
+        if db.query(Router).filter_by(ip_address=ip).first():
+            flash("Router IP already exists!", "danger")
+            return redirect(url_for("list_customers"))
+
+        branch = db.query(Branch).filter_by(id=int(branch_id)).first()
+        if not branch:
+            flash("Selected branch not found", "danger")
+            return redirect(url_for("list_customers"))
+
+        router = Router(
+            ip_address=ip,
+            description=description,
+            branch_id=int(branch_id),
+            username=username,
+            password=password,
+            port=port
+        )
+
+        db.add(router)
+        db.commit()
+
+    flash(f"✅ Router '{ip}' added", "success")
+    return redirect(url_for("list_customers"))
+
+@app.route("/customers/<int:customer_id>/assign_router", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def assign_router(customer_id):
+    router_id = request.form.get("router_id")
+    router_id = int(router_id) if router_id else None
+
+    with get_db() as db:
+        customer = db.query(Customer).filter_by(id=customer_id).first()
+        if not customer:
+            flash("Customer not found", "danger")
+            return redirect(url_for("list_customers"))
+
+        customer.router_id = router_id
+
+        # Optional: if customer was pending_router, make active when router assigned
+        if router_id and customer.status == "pending_router":
+            customer.status = "active"
+
+        db.commit()
+
+    flash("✅ Router assigned", "success")
+    return redirect(url_for("list_customers"))
+
 
 
 
@@ -863,70 +961,67 @@ def edit_customer(customer_id):
 
         branches = db.query(Branch).all()
 
-        # ✅ Selected branch is determined by customer's router -> branch
         selected_branch_id = (
             customer.router.branch.id
             if customer.router and customer.router.branch
             else None
         )
 
-        # ✅ Load routers ONLY for that branch
         routers = []
         if selected_branch_id:
             routers = db.query(Router).filter(Router.branch_id == selected_branch_id).all()
 
         if request.method == "POST":
-            # Keep old router id for comparison
-            old_router_id = customer.router_id
 
-            # ----------------- Customer fields -----------------
-            customer.account_no = request.form.get("account_no")
-            customer.name = request.form.get("name")
-            customer.phone = request.form.get("phone")
-            customer.email = request.form.get("email")
-            customer.location = request.form.get("location")
-            customer.ip_address = request.form.get("ip_address")
-            customer.billing_amount = request.form.get("billing_amount")
-            customer.start_date = request.form.get("start_date")
-            customer.contract_date = request.form.get("contract_date")
+            # ----------------- Customer fields (SAFE) -----------------
+            customer.account_no = to_str(request.form.get("account_no"))
+            customer.name = to_str(request.form.get("name"))
+            customer.phone = to_str(request.form.get("phone"))
 
-            # ✅ Assign router (router determines branch)
+            # ✅ FAT ID (IMPORTANT)
+            customer.fat_id = to_str(request.form.get("fat_id"))
+
+            customer.location = to_str(request.form.get("location"))
+            customer.ip_address = to_str(request.form.get("ip_address"))
+
+            # float + dates
+            customer.billing_amount = to_float(request.form.get("billing_amount"))
+            customer.start_date = to_datetime(request.form.get("start_date"))
+            customer.contract_date = to_datetime(request.form.get("contract_date"))
+
+            # ✅ Assign router
             selected_router_id = request.form.get("router_id")
             customer.router_id = int(selected_router_id) if selected_router_id else None
 
-            # ----------------- Network fields -----------------
+            # ----------------- Network fields (SAFE) -----------------
             network = customer.network or CustomerNetwork(customer_id=customer.id)
-            network.cable_no = request.form.get("cable_no")
-            network.cable_type = request.form.get("cable_type")
-            network.splitter = request.form.get("splitter")
-            network.tube_no = request.form.get("tube_no")
-            network.core_used = request.form.get("core_used")
-            network.final_coordinates = request.form.get("final_coordinates")
-            network.loop_no = request.form.get("loop_no")
-            network.power_level = request.form.get("power_level")
-            network.coordinates = request.form.get("coordinates")
+
+            network.cable_no = to_str(request.form.get("cable_no"))
+            network.cable_type = to_str(request.form.get("cable_type"))
+            network.splitter = to_str(request.form.get("splitter"))
+            network.tube_no = to_str(request.form.get("tube_no"))
+            network.core_used = to_str(request.form.get("core_used"))
+            network.loop_no = to_str(request.form.get("loop_no"))
+            network.power_level = to_str(request.form.get("power_level"))
+            network.final_coordinates = to_str(request.form.get("final_coordinates"))
+            network.coordinates = to_str(request.form.get("coordinates"))
+
             customer.network = network
 
             db.add(customer)
             db.commit()
 
-            # ✅ Apply MikroTik immediately (only if router exists + IP exists)
-            # IMPORTANT: Don't rely on customer.router after changing router_id; query it fresh
+            # ✅ MikroTik apply immediately
             router = db.query(Router).filter_by(id=customer.router_id).first() if customer.router_id else None
-
             if router and customer.ip_address:
                 try:
-                    # If customer is in any blocked-like state -> block
                     if customer.status in ["suspended", "manually_suspended", "on_hold"]:
                         block_ip(customer.ip_address, router)
                     else:
-                        # active/grace/pending_router/anything else -> unblock to ensure access
                         unblock_ip(customer.ip_address, router)
-
                 except Exception as e:
                     flash(f"⚠️ Customer saved but MikroTik action failed: {e}", "warning")
 
-            # Optional info message if router not assigned
             if customer.router_id is None:
                 flash("ℹ️ Customer updated. Router not assigned yet, so WiFi control is disabled.", "info")
             else:
@@ -943,8 +1038,6 @@ def edit_customer(customer_id):
             selected_router_id=customer.router_id,
             network=customer.network
         )
-
-
 
 @app.route("/delete_customer/<int:customer_id>", methods=["POST"])
 @login_required
@@ -1293,7 +1386,7 @@ def export_customers():
         ws.title = "Customers"
 
         headers = [
-            "Account No", "Name", "Phone", "Email", "Location", "IP Address", "Branch",
+            "Account No", "Name", "Phone", "Fat/id", "Location", "IP Address", "Branch",
             "Billing Amount", "Cable No", "Loop No", "Power Level", "Final Coordinates",
             "Coordinates", "Date Registered", "Password", "Status"
         ]
@@ -1301,7 +1394,7 @@ def export_customers():
 
         for c in customers:
             ws.append([
-                c.account_no, c.name, c.phone, c.email, c.location, c.ip_address,
+                c.account_no, c.name, c.phone, c.fat_id, c.location, c.ip_address,
                 c.router.branch.name if c.router and c.router.branch else "",
                 c.billing_amount, c.network.cable_no if c.network else "",
                 c.network.loop_no if c.network else "", c.network.power_level if c.network else "",
@@ -1353,7 +1446,7 @@ def export_customers_by_branch(branch_id):
         ws.title = f"{branch.name} Customers"
 
         headers = [
-            "Account No", "Name", "Phone", "Email", "Location",
+            "Account No", "Name", "Phone", "Fat/id", "Location",
             "IP Address", "Branch", "Billing Amount",
             "Cable No", "Loop No", "Power Level",
             "Final Coordinates", "Coordinates",
@@ -1366,7 +1459,7 @@ def export_customers_by_branch(branch_id):
                 c.account_no,
                 c.name,
                 c.phone,
-                c.email,
+                c.fat_id,
                 c.location,
                 c.ip_address,
                 branch.name,
