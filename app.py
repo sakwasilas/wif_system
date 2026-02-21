@@ -56,6 +56,9 @@ def login_required(f):
     return decorated_function
 
 #==================role based decorator===============
+from functools import wraps
+from flask import request
+
 def roles_required(*roles):
     def decorator(f):
         @wraps(f)
@@ -64,9 +67,18 @@ def roles_required(*roles):
                 flash("Please log in to continue.", "warning")
                 return redirect(url_for("login"))
 
-            if session.get("role") not in roles:
-                flash("Access denied.", "danger")
+            current_role = session.get("role")
+
+            if current_role not in roles:
+                # ✅ avoid spamming the same flash
+                if request.endpoint != "user_dashboard" and request.endpoint != "admin_dashboard":
+                    flash("Access denied.", "danger")
+
+                # ✅ redirect to correct dashboard (prevents infinite loop)
+                if current_role == "staff":
+                    return redirect(url_for("user_dashboard"))
                 return redirect(url_for("admin_dashboard"))
+
             return f(*args, **kwargs)
         return decorated_function
     return decorator
@@ -88,45 +100,164 @@ def popup_due(last_shown, today):
 def home():
     return redirect(url_for('login'))
 
+#_____________admin staff mgt_____________
+@app.route("/admin/users")
+@login_required
+@roles_required("admin", "super_admin")
+def admin_users():
+    with get_db() as db:
+        users = db.query(User).order_by(User.id.desc()).all()
+    return render_template("admin/users.html", users=users)
+#_____________staff user username and password__________
+
+@app.route("/admin/users/add", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def admin_add_user():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+
+        if not username or not password:
+            flash("Username and password are required.", "warning")
+            return redirect(url_for("admin_add_user"))
+
+        with get_db() as db:
+            if db.query(User).filter_by(username=username).first():
+                flash("Username already exists.", "danger")
+                return redirect(url_for("admin_add_user"))
+
+            new_user = User(
+                username=username,
+                password=generate_password_hash(password),
+                role="staff",        # ✅ staff
+                is_active=True       # ✅ active
+            )
+            db.add(new_user)
+            db.commit()
+
+        flash(f"User '{username}' added.", "success")
+        return redirect(url_for("admin_users"))
+
+    return render_template("admin/add_user.html")
+
+#_____________edit user username and password____________
+
+@app.route("/admin/users/<int:user_id>/edit", methods=["GET", "POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def admin_edit_user(user_id):
+    with get_db() as db:
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            flash("User not found.", "danger")
+            return redirect(url_for("admin_users"))
+
+        if request.method == "POST":
+            new_password = (request.form.get("password") or "").strip()
+            role = (request.form.get("role") or user.role).strip()
+            is_active = True if request.form.get("is_active") == "1" else False
+
+            if new_password:
+                user.password = generate_password_hash(new_password)
+
+            user.role = role
+            user.is_active = is_active
+            db.commit()
+
+            flash("User updated.", "success")
+            return redirect(url_for("admin_users"))
+
+    return render_template("admin/edit_user.html", user=user)
+
+#------------------delete user uasername and password_------------
+
+@app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
+@login_required
+@roles_required("admin", "super_admin")
+def admin_delete_user(user_id):
+    with get_db() as db:
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            flash("User not found.", "danger")
+            return redirect(url_for("admin_users"))
+
+        db.delete(user)
+        db.commit()
+
+    flash("User deleted.", "success")
+    return redirect(url_for("admin_users"))
+
+#----------___user dashboard_________________------------------
+@app.route("/user_dashboard")
+@login_required
+@roles_required("staff", "admin", "super_admin")
+def user_dashboard():
+    with get_db() as db:
+        # Customer stats (same as admin, but you can show fewer buttons in template)
+        total_users = db.query(Customer).count()
+        active_users = db.query(Customer).filter_by(status="active").count()
+        grace_users = db.query(Customer).filter_by(status="grace").count()
+        suspended_users = db.query(Customer).filter_by(status="suspended").count()
+        pending_router_users = db.query(Customer).filter_by(status="pending_router").count()
+
+    return render_template(
+        "user/user_dashboard.html",
+        username=session.get("username"),
+        role=session.get("role"),
+        total_users=total_users,
+        active_users=active_users,
+        grace_users=grace_users,
+        suspended_users=suspended_users,
+        pending_router_users=pending_router_users,
+        datetime=datetime
+    )
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+
+        # Super Admin (Hardcoded)
+        if username == "admin" and password == "admin123":
+            session["user_id"] = "super_admin"
+            session["username"] = "admin"
+            session["role"] = "super_admin"
+            flash("Welcome Super Admin", "success")
+            return redirect(url_for("admin_dashboard"))
 
         with get_db() as db:
             user = db.query(User).filter_by(username=username).first()
 
-            # Super admin hardcoded
-            if username == "admin" and password == "admin123":
-                session['user_id'] = "super_admin"
-                session['username'] = "admin"
-                session['role'] = "super_admin"
-                flash("Welcome Super Admin", "success")
+            if not user:
+                flash("Invalid username or password", "danger")
+                return redirect(url_for("login"))
+
+            # If using hashed passwords
+            if not check_password_hash(user.password, password):
+                flash("Invalid username or password", "danger")
+                return redirect(url_for("login"))
+
+            if not user.is_active:
+                flash("Account disabled. Contact admin.", "warning")
+                return redirect(url_for("login"))
+
+            # Save session
+            session["user_id"] = user.id
+            session["username"] = user.username
+            session["role"] = user.role
+
+            # Redirect by role
+            if user.role in ["admin", "super_admin"]:
                 return redirect(url_for("admin_dashboard"))
-
-            # Regular admin
-            if user and check_password_hash(user.password, password):
-                if user.role != "super_admin" and not user.is_active:
-                    flash("Your account is pending approval. Please contact the admin.", "warning")
-                    return redirect(url_for("login"))
-
-                if user.role not in ["admin", "super_admin"]:
-                    flash("Access denied. You are not an admin.", "danger")
-                    return redirect(url_for("login"))
-
-                # Explicit session assignments
-                session['user_id'] = user.id
-                session['username'] = user.username
-                session['role'] = user.role
-                flash("Welcome", "success")
-                return redirect(url_for("admin_dashboard"))
-
-            flash("Invalid username or password", "danger")
+            elif user.role == "staff":
+                return redirect(url_for("user_dashboard"))
+            else:
+                flash("Access denied.", "danger")
+                return redirect(url_for("login"))
 
     return render_template("login.html")
-
-
 @app.route("/logout")
 
 def logout():
@@ -262,7 +393,7 @@ def register():
 # ==================== ADD BRANCH ====================
 @app.route("/add_branch", methods=["GET", "POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def add_branch():
     with get_db() as db:
         if request.method == "POST":
@@ -335,7 +466,7 @@ def list_branches():
 #=======================router management==========================
 @app.route("/add_router", methods=["GET", "POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def add_router():
     with get_db() as db:
         branches = db.query(Branch).all()
@@ -521,7 +652,7 @@ def to_float(val):
 
 @app.route("/import_customers", methods=["POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def import_customers():
     file = request.files.get("excel_file")
     if not file:
@@ -680,7 +811,7 @@ def to_datetime(val, fmt="%Y-%m-%d"):
 # ==================== CUSTOMER MANAGEMENT ====================
 @app.route("/add_customer", methods=["GET", "POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def add_customer():
     with get_db() as db:
         branches = db.query(Branch).all()
@@ -784,7 +915,7 @@ def add_customer():
 
 @app.route("/customers")
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def list_customers():
     search_term = request.args.get("search", "").strip()
     status_filter = request.args.get("status", "").strip()
@@ -830,7 +961,7 @@ def list_customers():
 
 @app.route("/customers/quick_add_branch", methods=["POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def quick_add_branch():
     name = (request.form.get("name") or "").strip()
 
@@ -853,7 +984,7 @@ def quick_add_branch():
 
 @app.route("/customers/quick_add_router", methods=["POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def quick_add_router():
     ip = (request.form.get("ip_address") or "").strip()
     branch_id = request.form.get("branch_id")
@@ -892,7 +1023,7 @@ def quick_add_router():
 
 @app.route("/customers/<int:customer_id>/assign_router", methods=["POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def assign_router(customer_id):
     router_id = request.form.get("router_id")
     router_id = int(router_id) if router_id else None
@@ -919,7 +1050,7 @@ def assign_router(customer_id):
 
 @app.route("/edit_customer/<int:customer_id>", methods=["GET", "POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def edit_customer(customer_id):
     with get_db() as db:
         customer = db.query(Customer).options(
@@ -1291,7 +1422,7 @@ def wifi_access(ip_address):
 
 @app.route("/suspended_customers")
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def suspended_customers():
     if not session.get("user_id"):
         return redirect(url_for("login"))
@@ -1305,7 +1436,7 @@ def suspended_customers():
 # ==================== MARK PAID ====================
 @app.route("/mark_paid/<int:customer_id>", methods=["POST"])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def mark_paid(customer_id):
     with get_db() as db:
         customer = (
@@ -1492,7 +1623,7 @@ def export_customers_by_branch(branch_id):
 
 @app.route("/toggle_suspend/<int:customer_id>")
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def toggle_suspend(customer_id):
     with get_db() as db:
         customer = db.query(Customer).filter_by(id=customer_id).first()
@@ -1521,7 +1652,7 @@ def toggle_suspend(customer_id):
 
 @app.route("/toggle_hold/<int:customer_id>")
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def toggle_hold(customer_id):
     with get_db() as db:
         customer = db.query(Customer).filter_by(id=customer_id).first()
@@ -1551,7 +1682,7 @@ def toggle_hold(customer_id):
 # Hold customer with selected date
 @app.route('/hold_customer/<int:customer_id>', methods=['POST'])
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def hold_customer(customer_id):
     hold_until_str = request.form.get('hold_until')
     
@@ -1574,7 +1705,7 @@ def hold_customer(customer_id):
 # Unhold customer
 @app.route('/unhold_customer/<int:customer_id>')
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def unhold_customer(customer_id):
     with get_db() as db:
         customer = db.query(Customer).filter_by(id=customer_id).first()
@@ -1595,7 +1726,7 @@ def unhold_customer(customer_id):
 
 @app.route('/manual_manage_customers')
 @login_required
-@roles_required("admin", "super_admin")
+@roles_required("admin", "super_admin","staff")
 def manual_manage_customers():
 
     with get_db() as db:

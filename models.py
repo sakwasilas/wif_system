@@ -3,17 +3,18 @@ from sqlalchemy.orm import relationship
 from connections import Base
 
 
-# ==================== USER MODEL ====================
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(100), unique=True, index=True, nullable=False)
     password = Column(String(255), nullable=False)
+
     security_question = Column(String(255))
     security_answer = Column(String(255))
-    is_active = Column(Boolean, default=False)
-    role = Column(String(50), default="user")
+
+    is_active = Column(Boolean, default=True)     
+    role = Column(String(50), default="staff")    
 
 
 # ==================== BRANCH MODEL ====================

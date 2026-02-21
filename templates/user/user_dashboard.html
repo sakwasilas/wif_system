@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>User Dashboard</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <style>
+    body { background:#f4f6fb; font-family: "Segoe UI", Tahoma, sans-serif; }
+
+    .hero {
+      background: radial-gradient(1200px 600px at 10% -10%, rgba(37,99,235,.25), transparent 50%),
+                  radial-gradient(1200px 600px at 90% 0%, rgba(34,197,94,.20), transparent 55%),
+                  linear-gradient(135deg, #0b1220, #111827);
+      color:#fff;
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 18px 40px rgba(0,0,0,.18);
+    }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:7px 12px; border-radius:999px;
+      background: rgba(255,255,255,.10);
+      border: 1px solid rgba(255,255,255,.18);
+      font-weight: 700; font-size: 13px;
+    }
+
+    .tile {
+      border-radius: 16px;
+      background: #fff;
+      border: 1px solid #eef1f7;
+      box-shadow: 0 12px 28px rgba(0,0,0,.06);
+      transition: .15s ease-in-out;
+      cursor: pointer;
+      overflow: hidden;
+      position: relative;
+      min-height: 120px;
+    }
+    .tile:hover { transform: translateY(-2px); box-shadow: 0 18px 36px rgba(0,0,0,.09); }
+    .tile .cap { font-size: 13px; color:#6b7280; font-weight: 700; }
+    .tile .val { font-size: 30px; font-weight: 900; margin-top: 6px; }
+    .tile .mini { font-size: 12px; color:#6b7280; }
+    .tile::after{
+      content:"";
+      position:absolute; right:-35px; top:-35px;
+      width: 120px; height: 120px; border-radius:50%;
+      background: rgba(0,0,0,.03);
+    }
+
+    .stripe { height: 6px; width: 100%; }
+    .c-total   { background: linear-gradient(90deg,#0f172a,#334155); }
+    .c-active  { background: linear-gradient(90deg,#16a34a,#22c55e); }
+    .c-grace   { background: linear-gradient(90deg,#f59e0b,#fbbf24); }
+    .c-susp    { background: linear-gradient(90deg,#dc2626,#f43f5e); }
+    .c-pending { background: linear-gradient(90deg,#2563eb,#60a5fa); }
+
+    .panel {
+      border-radius: 18px;
+      background: #fff;
+      border: 1px solid #eef1f7;
+      box-shadow: 0 12px 28px rgba(0,0,0,.06);
+    }
+
+    .action-btn{
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-weight: 800;
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+      border:1px solid #eef1f7;
+      background:#fff;
+      text-decoration:none;
+      color:#111827;
+      transition: .15s ease-in-out;
+    }
+    .action-btn:hover{ transform: translateY(-1px); box-shadow: 0 10px 20px rgba(0,0,0,.06); }
+    .kbd {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background:#f3f4f6;
+      border:1px solid #e5e7eb;
+      color:#374151;
+      font-weight: 800;
+    }
+
+    .quick a{
+      text-decoration:none;
+      font-weight:800;
+      color:#111827;
+      padding:8px 10px;
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.20);
+      background: rgba(255,255,255,.08);
+    }
+    .quick a:hover{ background: rgba(255,255,255,.12); }
+  </style>
+</head>
+
+<body>
+<div class="container my-4">
+
+  <!-- HERO -->
+  <div class="hero mb-3">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+      <div>
+        <div style="font-size:22px; font-weight:900;">📶 Staff Dashboard</div>
+        <div class="text-white-50" style="font-size:13px;">Customers + Network Setup + Reports</div>
+      </div>
+
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="pill">👤 <b>{{ username }}</b></span>
+        <span class="pill">Role: <b>{{ role }}</b></span>
+        <span class="pill">{{ datetime.utcnow().strftime("%d %b %Y") }}</span>
+        <a class="btn btn-outline-light btn-sm" href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    </div>
+
+    <!-- quick actions (no duplicates) -->
+    <div class="d-flex flex-wrap gap-2 mt-3 quick">
+      <a href="/add_customer">➕ Add Customer</a>
+      <a href="/customers">📋 Customers</a>
+      <a href="/add_branch">🏢 Add Branch</a>
+      <a href="/add_router">🖧 Add Router</a>
+      <a href="/admin/monthly_report">📊 Monthly Report</a>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="tile" onclick="window.location='/customers'">
+        <div class="stripe c-total"></div>
+        <div class="p-3">
+          <div class="cap">Total Customers</div>
+          <div class="val">{{ total_users }}</div>
+          <div class="mini">All records</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="tile" onclick="window.location='/customers?status=active'">
+        <div class="stripe c-active"></div>
+        <div class="p-3">
+          <div class="cap">Active</div>
+          <div class="val text-success">{{ active_users }}</div>
+          <div class="mini">Allowed to browse</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="tile" onclick="window.location='/customers?status=grace'">
+        <div class="stripe c-grace"></div>
+        <div class="p-3">
+          <div class="cap">Grace</div>
+          <div class="val" style="color:#b45309;">{{ grace_users }}</div>
+          <div class="mini">Temporary access</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="tile" onclick="window.location='/customers?status=suspended'">
+        <div class="stripe c-susp"></div>
+        <div class="p-3">
+          <div class="cap">Suspended</div>
+          <div class="val text-danger">{{ suspended_users }}</div>
+          <div class="mini">Blocked until payment</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="tile" onclick="window.location='/customers?status=pending_router'">
+        <div class="stripe c-pending"></div>
+        <div class="p-3">
+          <div class="cap">Pending Router</div>
+          <div class="val" style="color:#1d4ed8;">{{ pending_router_users }}</div>
+          <div class="mini">Assign router to enable WiFi control</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACTIONS -->
+  <div class="row g-3 mt-1">
+    <div class="col-lg-6">
+      <div class="panel p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-bold">Customer Work</div>
+          <span class="text-muted" style="font-size:12px;">Add / Edit / Mark Paid</span>
+        </div>
+
+        <div class="d-grid gap-2">
+          <a class="action-btn" href="/add_customer">
+            <span>➕ Add Customer</span>
+            <span class="kbd">Add</span>
+          </a>
+
+          <a class="action-btn" href="/customers">
+            <span>✏️ Edit Customer / ✅ Mark Paid</span>
+            <span class="kbd">Open List</span>
+          </a>
+
+          <a class="action-btn" href="/manual_manage_customers">
+            <span>⚙️ Manual Manage</span>
+            <span class="kbd">Tools</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="panel p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-bold">Branch & Router</div>
+          <span class="text-muted" style="font-size:12px;">Setup network</span>
+        </div>
+
+        <div class="d-grid gap-2">
+          <a class="action-btn" href="/add_branch">
+            <span>🏢 Add Branch</span>
+            <span class="kbd">Branch</span>
+          </a>
+
+          <a class="action-btn" href="/add_router">
+            <span>🖧 Add Router</span>
+            <span class="kbd">Router</span>
+          </a>
+
+          <a class="action-btn" href="/branches">
+            <span>🏢 View Branches</span>
+            <span class="kbd">List</span>
+          </a>
+
+          <a class="action-btn" href="/routers">
+            <span>🖧 View Routers</span>
+            <span class="kbd">List</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REPORTS -->
+  <div class="panel p-3 mt-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="fw-bold">Reports</div>
+      <span class="text-muted" style="font-size:12px;">Daily / Weekly / Monthly / Yearly</span>
+    </div>
+
+    <!-- Only monthly exists in your routes now -->
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-dark btn-sm" href="/admin/monthly_report">📊 Monthly</a>
+
+      <!-- Add these only after you create routes -->
+      <button class="btn btn-outline-secondary btn-sm" disabled>📅 Daily (add route)</button>
+      <button class="btn btn-outline-secondary btn-sm" disabled>🗓 Weekly (add route)</button>
+      <button class="btn btn-outline-secondary btn-sm" disabled>📈 Yearly (add route)</button>
+    </div>
+
+    <div class="text-muted mt-2" style="font-size:12px;">
+      Tip: create /reports/daily, /reports/weekly, /reports/yearly then replace disabled buttons with links.
+    </div>
+  </div>
+
+  <div class="text-center mt-4 text-muted">
+    <small>&copy; {{ datetime.utcnow().year }} My ISP System</small>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
