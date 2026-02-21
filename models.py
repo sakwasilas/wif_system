@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from connections import Base
+from datetime import datetime
 
 
 class User(Base):
@@ -125,3 +126,20 @@ class CustomerNetwork(Base):
     coordinates = Column(String(255))
 
     customer = relationship("Customer", back_populates="network")
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+
+    amount = Column(Float, nullable=False, default=0)
+    method = Column(String(50), nullable=True)         # Mpesa, Cash, Bank, etc.
+    reference = Column(String(100), nullable=True)     # Mpesa code / receipt number
+    notes = Column(String(255), nullable=True)
+
+    paid_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # relationship back to customer
+    customer = relationship("Customer", backref="payments")

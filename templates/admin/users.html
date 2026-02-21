@@ -18,7 +18,7 @@
   <div class="container-fluid">
     <span class="navbar-brand">📶 WiFi Management</span>
     <div class="d-flex align-items-center">
-      <span class="navbar-text text-white me-3">👤 {{ username }}</span>
+      <span class="navbar-text text-white me-3">👤 {{ session.get('username') }}</span>
       <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
     </div>
   </div>
@@ -31,11 +31,15 @@
     <div class="col-md-3">
       <div class="sidebar shadow-sm">
 
-        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary btn-sm w-100 mb-2">⬅ Back Dashboard</a>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary btn-sm w-100 mb-2">
+          ⬅ Back Dashboard
+        </a>
 
         <hr>
 
-        <a href="{{ url_for('admin_add_user') }}" class="btn btn-primary btn-sm w-100 mb-2">➕ Add Staff</a>
+        <a href="{{ url_for('admin_add_user') }}" class="btn btn-primary btn-sm w-100 mb-2">
+          ➕ Add Staff
+        </a>
 
       </div>
     </div>
@@ -50,16 +54,17 @@
           <!-- Flash messages -->
           {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-              <ul class="mb-3">
-                {% for category, message in messages %}
-                  <li class="
-                    {% if category == 'success' %}text-success
-                    {% elif category == 'warning' %}text-warning
-                    {% elif category == 'info' %}text-info
-                    {% else %}text-danger{% endif %}
-                  ">{{ message }}</li>
-                {% endfor %}
-              </ul>
+              {% for category, message in messages %}
+                <div class="alert 
+                  {% if category == 'success' %}alert-success
+                  {% elif category == 'warning' %}alert-warning
+                  {% elif category == 'info' %}alert-info
+                  {% else %}alert-danger{% endif %}
+                  alert-dismissible fade show" role="alert">
+                  {{ message }}
+                  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+              {% endfor %}
             {% endif %}
           {% endwith %}
 
@@ -71,7 +76,7 @@
                   <th>Username</th>
                   <th>Role</th>
                   <th>Active</th>
-                  <th style="width: 180px;">Actions</th>
+                  <th style="width:200px;">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -80,22 +85,43 @@
                   <td>{{ u.id }}</td>
                   <td>{{ u.username }}</td>
                   <td>{{ u.role }}</td>
-                  <td>{{ "Yes" if u.is_active else "No" }}</td>
                   <td>
+                    {% if u.is_active %}
+                      <span class="badge bg-success">Yes</span>
+                    {% else %}
+                      <span class="badge bg-danger">No</span>
+                    {% endif %}
+                  </td>
+                  <td>
+
                     <!-- Toggle Active -->
-                    <form action="{{ url_for('admin_toggle_user', user_id=u.id) }}" method="POST" style="display:inline;">
+                    <form action="{{ url_for('toggle_user', user_id=u.id) }}"
+                          method="POST"
+                          style="display:inline;">
                       <button type="submit" class="btn btn-sm btn-warning">
                         {{ "Deactivate" if u.is_active else "Activate" }}
                       </button>
                     </form>
 
-                    <!-- Delete -->
-                    <form action="{{ url_for('admin_delete_user', user_id=u.id) }}" method="POST" style="display:inline;">
-                      <button type="submit" class="btn btn-sm btn-danger"
+                    <!-- Edit -->
+                    <a href="{{ url_for('admin_edit_user', user_id=u.id) }}"
+                       class="btn btn-sm btn-info">
+                      Edit
+                    </a>
+
+                    <!-- Prevent deleting yourself -->
+                    {% if u.username != session.get('username') %}
+                    <form action="{{ url_for('admin_delete_user', user_id=u.id) }}"
+                          method="POST"
+                          style="display:inline;">
+                      <button type="submit"
+                              class="btn btn-sm btn-danger"
                               onclick="return confirm('Delete this user?')">
                         Delete
                       </button>
                     </form>
+                    {% endif %}
+
                   </td>
                 </tr>
                 {% endfor %}

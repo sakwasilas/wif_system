@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block content %}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+  .hero {
+    background: radial-gradient(1200px 600px at 10% -10%, rgba(37,99,235,.25), transparent 50%),
+                radial-gradient(1200px 600px at 90% 0%, rgba(34,197,94,.20), transparent 55%),
+                linear-gradient(135deg, #0b1220, #111827);
+    color:#fff;
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 14px 30px rgba(0,0,0,.14);
+  }
+  .pill {
+    display:inline-flex; align-items:center; gap:8px;
+    padding:7px 12px; border-radius:999px;
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.18);
+    font-weight: 700; font-size: 13px;
+  }
+  .cardx {
+    border-radius: 16px;
+    border: 1px solid #eef1f7;
+    box-shadow: 0 10px 24px rgba(0,0,0,.06);
+  }
+  .stat {
+    border-radius: 16px;
+    background: #fff;
+    border: 1px solid #eef1f7;
+    box-shadow: 0 10px 24px rgba(0,0,0,.06);
+    overflow:hidden;
+  }
+  .stripe { height: 6px; width:100%; }
+  .s1 { background: linear-gradient(90deg,#0f172a,#334155); }
+  .s2 { background: linear-gradient(90deg,#16a34a,#22c55e); }
+  .s3 { background: linear-gradient(90deg,#2563eb,#60a5fa); }
+
+  .cap { font-size: 13px; color:#6b7280; font-weight: 800; }
+  .val { font-size: 28px; font-weight: 900; margin-top: 4px; }
+  .mini { font-size: 12px; color:#6b7280; }
+
+  .table thead th { white-space: nowrap; }
+</style>
+
+<div class="container-fluid py-3">
+
+  <!-- Flash messages -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <!-- Header -->
+  <div class="hero mb-3">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+      <div>
+        <div style="font-size:22px;font-weight:900;">📅 Daily Payments Report</div>
+        <div class="text-white-50" style="font-size:13px;">
+          Report date: <b>{{ today.strftime("%d %b %Y") }}</b>
+        </div>
+      </div>
+
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="pill">👤 <b>{{ username }}</b></span>
+        <span class="pill">Role: <b>{{ role }}</b></span>
+
+        <!-- Back: staff goes to user_dashboard, admin to admin_dashboard -->
+        {% if role == "staff" %}
+          <a href="{{ url_for('user_dashboard') }}" class="btn btn-outline-light btn-sm">⬅ Back</a>
+        {% else %}
+          <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-light btn-sm">⬅ Back</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="stat">
+        <div class="stripe s1"></div>
+        <div class="p-3">
+          <div class="cap">Number of Payments</div>
+          <div class="val">{{ payments_count }}</div>
+          <div class="mini">Payments recorded today</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="stat">
+        <div class="stripe s2"></div>
+        <div class="p-3">
+          <div class="cap">Total Collected (KES)</div>
+          <div class="val">{{ "{:,.2f}".format(total_amount) }}</div>
+          <div class="mini">Sum of amounts paid today</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="stat">
+        <div class="stripe s3"></div>
+        <div class="p-3">
+          <div class="cap">Top Method</div>
+          <div class="val">
+            {% if method_rows and method_rows|length > 0 %}
+              {{ method_rows[0].method }}
+            {% else %}
+              N/A
+            {% endif %}
+          </div>
+          <div class="mini">Method with highest amount today</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Method breakdown -->
+    <div class="col-lg-4">
+      <div class="card cardx">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0 fw-bold">💳 Breakdown by Method</h6>
+            <span class="text-muted small">Today</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th class="text-end">Count</th>
+                  <th class="text-end">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in method_rows %}
+                  <tr>
+                    <td>{{ r.method }}</td>
+                    <td class="text-end">{{ r.cnt }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(r.amt) }}</td>
+                  </tr>
+                {% endfor %}
+
+                {% if not method_rows or method_rows|length == 0 %}
+                  <tr>
+                    <td colspan="3" class="text-center text-muted">No payments today.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Payments list -->
+    <div class="col-lg-8">
+      <div class="card cardx">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <h6 class="mb-0 fw-bold">🧾 Payments (Latest First)</h6>
+            <span class="text-muted small">Showing up to 500</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>#</th>
+                  <th>Time</th>
+                  <th>Customer</th>
+                  <th>Account</th>
+                  <th>Branch</th>
+                  <th>Router</th>
+                  <th>Method</th>
+                  <th>Ref</th>
+                  <th class="text-end">Amount (KES)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in payments %}
+                  <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>
+                      {{ p.paid_at.strftime("%H:%M:%S") if p.paid_at else "" }}
+                    </td>
+                    <td>{{ p.customer.name if p.customer else "" }}</td>
+                    <td>{{ p.customer.account_no if p.customer else "" }}</td>
+                    <td>
+                      {% if p.customer and p.customer.router and p.customer.router.branch %}
+                        {{ p.customer.router.branch.name }}
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if p.customer and p.customer.router %}
+                        {{ p.customer.router.ip_address }}
+                      {% endif %}
+                    </td>
+                    <td>{{ p.method or "Unknown" }}</td>
+                    <td>{{ p.reference or "" }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(p.amount or 0) }}</td>
+                  </tr>
+                {% endfor %}
+
+                {% if not payments or payments|length == 0 %}
+                  <tr>
+                    <td colspan="9" class="text-center text-muted">No payments recorded today.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+{% endblock %}

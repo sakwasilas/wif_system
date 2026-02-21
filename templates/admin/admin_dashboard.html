@@ -415,8 +415,16 @@
             <a href="{{ url_for('add_customer') }}" class="btn btn-success btn-soft">➕ Add Customer</a>
             <a href="{{ url_for('list_customers') }}" class="btn btn-primary btn-soft">📋 View Customers</a>
             <a href="{{ url_for('admin_users') }}" class="btn btn-dark btn-soft">👥 Manage Staff</a>
-            <a href="{{ url_for('monthly_report') }}" class="btn btn-danger btn-soft">📊 Reports</a>
+            <a class="action-btn" href="{{ url_for('daily_report') }}">
+            <span>📊 Daily Report</span>
+            <span class="kbd">Today</span>
+                </a>
+                <a class="action-btn" href="/reports/monthly">
+                <span>📅 Monthly Report</span>
+  <span class="kbd">KES</span>
+</a>
           </div>
+          
         </div>
 
         <!-- Notes / System Info -->

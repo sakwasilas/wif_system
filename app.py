@@ -15,13 +15,13 @@ from mikrotik_helper import block_ip, unblock_ip, get_mikrotik_connection
 
 
 # ==================== THIRD-PARTY ====================
-from werkzeug.security import generate_password_hash, check_password_hash
+#from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook
 from sqlalchemy.orm import joinedload
 
 # ==================== LOCAL MODULES ====================
 from connections import SessionLocal
-from models import User, Customer, CustomerNetwork, Branch, Router
+from models import User, Customer, CustomerNetwork, Branch, Router,Payment
 
 # ==================== FLASK APP ====================
 app = Flask(__name__)
@@ -129,7 +129,7 @@ def admin_add_user():
 
             new_user = User(
                 username=username,
-                password=generate_password_hash(password),
+                password=password,
                 role="staff",        # ✅ staff
                 is_active=True       # ✅ active
             )
@@ -159,7 +159,7 @@ def admin_edit_user(user_id):
             is_active = True if request.form.get("is_active") == "1" else False
 
             if new_password:
-                user.password = generate_password_hash(new_password)
+                user.password = new_password
 
             user.role = role
             user.is_active = is_active
@@ -219,7 +219,7 @@ def login():
         username = (request.form.get("username") or "").strip()
         password = request.form.get("password") or ""
 
-        # Super Admin (Hardcoded)
+        # OPTIONAL: remove this if you want ONLY DB roles to control access
         if username == "admin" and password == "admin123":
             session["user_id"] = "super_admin"
             session["username"] = "admin"
@@ -234,8 +234,8 @@ def login():
                 flash("Invalid username or password", "danger")
                 return redirect(url_for("login"))
 
-            # If using hashed passwords
-            if not check_password_hash(user.password, password):
+            # Plain text password check
+            if user.password != password:
                 flash("Invalid username or password", "danger")
                 return redirect(url_for("login"))
 
@@ -258,8 +258,12 @@ def login():
                 return redirect(url_for("login"))
 
     return render_template("login.html")
-@app.route("/logout")
 
+@app.route("/register")
+def register():
+    return "Registration disabled", 403
+
+@app.route("/logout")
 def logout():
     session.clear()
     flash("Logged out successfully", "info")
@@ -359,36 +363,36 @@ def toggle_user(user_id):
         db.close()
     return redirect(url_for("manage_users"))
 
-@app.route("/register", methods=["GET", "POST"])
+# @app.route("/register", methods=["GET", "POST"])
 
-def register():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-        if not username or not password:
-            flash("Username and password are required", "warning")
-            return redirect(url_for("register"))
+# def register():
+#     if request.method == "POST":
+#         username = request.form.get("username", "").strip()
+#         password = request.form.get("password", "")
+#         if not username or not password:
+#             flash("Username and password are required", "warning")
+#             return redirect(url_for("register"))
 
-        db = SessionLocal()
-        try:
-            existing = db.query(User).filter_by(username=username).first()
-            if existing:
-                flash("Username already taken", "danger")
-                return redirect(url_for("register"))
+#         db = SessionLocal()
+#         try:
+#             existing = db.query(User).filter_by(username=username).first()
+#             if existing:
+#                 flash("Username already taken", "danger")
+#                 return redirect(url_for("register"))
 
-            new_user = User(
-                username=username,
-                password=generate_password_hash(password),
-                role="admin",
-                is_active=False
-            )
-            db.add(new_user)
-            db.commit()
-            flash("Registration submitted. Wait for super admin approval.", "info")
-            return redirect(url_for("login"))
-        finally:
-            db.close()
-    return render_template("register.html")
+#             new_user = User(
+#                 username=username,
+#                 password=generate_password_hash(password),
+#                 role="admin",
+#                 is_active=False
+#             )
+#             db.add(new_user)
+#             db.commit()
+#             flash("Registration submitted. Wait for super admin approval.", "info")
+#             return redirect(url_for("login"))
+#         finally:
+#             db.close()
+#     return render_template("register.html")
 
 # ==================== ADD BRANCH ====================
 @app.route("/add_branch", methods=["GET", "POST"])
@@ -1165,35 +1169,7 @@ def delete_customer(customer_id):
 
 
 
-@app.route('/admin/monthly_report')
-def monthly_report():
-    session = SessionLocal()
 
-    try:
-        # Query monthly stats
-        monthly_data = session.query(
-            func.date_format(Customer.start_date, '%Y-%m').label('month'),
-            func.sum(case([(Customer.status=='active', 1)], else_=0)).label('active_clients'),
-            func.sum(case([(Customer.status=='grace', 1)], else_=0)).label('grace_clients'),
-            func.sum(case([(Customer.status=='suspended', 1)], else_=0)).label('suspended_clients'),
-            func.sum(Customer.billing_amount).label('total_collection')
-        ).filter(Customer.start_date != None).group_by('month').order_by('month').all()
-
-        # Convert result to list of dicts for easier rendering
-        report = []
-        for row in monthly_data:
-            report.append({
-                'month': row.month,
-                'active_clients': row.active_clients,
-                'grace_clients': row.grace_clients,
-                'suspended_clients': row.suspended_clients,
-                'total_collection': row.total_collection
-            })
-
-        return render_template('admin/monthly_report.html', report=report)
-
-    finally:
-        session.close()
 
 #==================== GRACE / WIFI ACCESS ====================
 @app.route("/grace_popup/<ip_address>", methods=["GET", "POST"])
@@ -1436,7 +1412,7 @@ def suspended_customers():
 # ==================== MARK PAID ====================
 @app.route("/mark_paid/<int:customer_id>", methods=["POST"])
 @login_required
-@roles_required("admin", "super_admin","staff")
+@roles_required("admin", "super_admin", "staff")
 def mark_paid(customer_id):
     with get_db() as db:
         customer = (
@@ -1451,12 +1427,30 @@ def mark_paid(customer_id):
 
         router = customer.router
 
-        # ✅ restart new 30-day cycle
+        # ===================== ✅ 1) RECORD PAYMENT =====================
+        # Default amount = customer billing_amount (you can change later to manual entry)
+        amount = float(customer.billing_amount or 0)
+
+        method = (request.form.get("method") or "").strip() or None
+        reference = (request.form.get("reference") or "").strip() or None
+        notes = (request.form.get("notes") or "").strip() or None
+
+        payment = Payment(
+            customer_id=customer.id,
+            amount=amount,
+            method=method,
+            reference=reference,
+            notes=notes,
+            paid_at=datetime.utcnow()
+        )
+        db.add(payment)
+
+        # ===================== ✅ 2) RESTART CYCLE / RESET STATUS =====================
         customer.start_date = datetime.utcnow()
         customer.status = "active"
         customer.active_card_cycle_start = None
 
-        # ✅ reset manual restrictions (ONLY keep fields that exist in your model)
+        # ✅ reset manual restrictions
         if hasattr(customer, "manually_suspended"):
             customer.manually_suspended = False
         if hasattr(customer, "hold_status"):
@@ -1464,7 +1458,7 @@ def mark_paid(customer_id):
         if hasattr(customer, "hold_until"):
             customer.hold_until = None
 
-        # ✅ reset legacy fields (keep if still used anywhere)
+        # ✅ reset legacy fields
         if hasattr(customer, "grace_days"):
             customer.grace_days = 0
         if hasattr(customer, "popup_shown"):
@@ -1484,18 +1478,17 @@ def mark_paid(customer_id):
 
         db.commit()
 
-        # ✅ unblock on MikroTik
+        # ===================== ✅ 3) UNBLOCK ON MIKROTIK =====================
         if router and customer.ip_address:
             try:
                 unblock_ip(customer.ip_address, router)
-                flash(f"{customer.name} is marked paid and WiFi is active.", "success")
+                flash(f"✅ Payment saved (KES {amount}). {customer.name} is active.", "success")
             except Exception as e:
-                flash(f"Marked paid but MikroTik error: {e}", "warning")
+                flash(f"✅ Payment saved, but MikroTik unblock failed: {e}", "warning")
         else:
-            flash(f"{customer.name} is marked paid. No router assigned.", "info")
+            flash(f"✅ Payment saved (KES {amount}). No router assigned.", "info")
 
     return redirect(url_for("list_customers"))
-
 
 # ==================== EXPORT TO EXCEL ====================
 @app.route("/customers/export", methods=["GET"])
@@ -1797,6 +1790,190 @@ def daily_status_check(db=None):
     finally:
         if close_session:
             db.close()
+            
+@app.route("/reports/daily")
+@login_required
+@roles_required("admin", "super_admin", "staff")
+def daily_report():
+    # Use UTC day boundaries
+    today = datetime.utcnow().date()
+    start_dt = datetime(today.year, today.month, today.day)
+    end_dt = start_dt + timedelta(days=1)
+
+    with get_db() as db:
+        # Totals
+        totals = db.query(
+            func.count(Payment.id).label("payments_count"),
+            func.coalesce(func.sum(Payment.amount), 0).label("total_amount"),
+        ).filter(
+            Payment.paid_at >= start_dt,
+            Payment.paid_at < end_dt
+        ).first()
+
+        payments_count = int(getattr(totals, "payments_count", 0) or 0)
+        total_amount = float(getattr(totals, "total_amount", 0) or 0)
+
+        # Breakdown by method
+        method_rows = db.query(
+            func.coalesce(Payment.method, "Unknown").label("method"),
+            func.count(Payment.id).label("cnt"),
+            func.coalesce(func.sum(Payment.amount), 0).label("amt"),
+        ).filter(
+            Payment.paid_at >= start_dt,
+            Payment.paid_at < end_dt
+        ).group_by(
+            func.coalesce(Payment.method, "Unknown")
+        ).order_by(
+            func.coalesce(func.sum(Payment.amount), 0).desc()
+        ).all()
+
+        # Recent payments list
+        payments = (
+            db.query(Payment)
+            .options(
+                joinedload(Payment.customer)
+                .joinedload(Customer.router)
+                .joinedload(Router.branch)
+            )
+            .filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt)
+            .order_by(Payment.paid_at.desc())
+            .limit(500)
+            .all()
+        )
+
+    return render_template(
+        "reports/daily_report.html",
+        username=session.get("username"),
+        role=session.get("role"),
+        today=today,
+        payments_count=payments_count,
+        total_amount=total_amount,
+        method_rows=method_rows,
+        payments=payments,
+    )
+
+@app.route("/reports/weekly")
+@login_required
+@roles_required("admin", "super_admin", "staff")
+def weekly_report():
+    today = datetime.utcnow().date()
+    start_dt = datetime(today.year, today.month, today.day) - timedelta(days=today.weekday())  # Monday
+    end_dt = start_dt + timedelta(days=7)
+
+    with get_db() as db:
+        totals = db.query(
+            func.count(Payment.id).label("payments_count"),
+            func.coalesce(func.sum(Payment.amount), 0).label("total_amount"),
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt).first()
+
+        method_rows = db.query(
+            func.coalesce(Payment.method, "Unknown").label("method"),
+            func.count(Payment.id).label("cnt"),
+            func.coalesce(func.sum(Payment.amount), 0).label("amt"),
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt)\
+         .group_by(func.coalesce(Payment.method, "Unknown"))\
+         .order_by(func.coalesce(func.sum(Payment.amount), 0).desc())\
+         .all()
+
+        payments = db.query(Payment).options(
+            joinedload(Payment.customer).joinedload(Customer.router).joinedload(Router.branch)
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt)\
+         .order_by(Payment.paid_at.desc()).limit(500).all()
+
+    return render_template(
+        "reports/weekly_report.html",
+        username=session.get("username"),
+        role=session.get("role"),
+        start_dt=start_dt,
+        end_dt=end_dt,
+        payments_count=int(getattr(totals, "payments_count", 0) or 0),
+        total_amount=float(getattr(totals, "total_amount", 0) or 0),
+        method_rows=method_rows,
+        payments=payments,
+    )
+
+
+@app.route("/reports/monthly")
+@login_required
+@roles_required("admin", "super_admin", "staff")
+def monthly_report():
+    today = datetime.utcnow().date()
+    start_dt = datetime(today.year, today.month, 1)
+    next_month = (start_dt.replace(day=28) + timedelta(days=4)).replace(day=1)
+    end_dt = next_month
+
+    with get_db() as db:
+        totals = db.query(
+            func.count(Payment.id).label("payments_count"),
+            func.coalesce(func.sum(Payment.amount), 0).label("total_amount"),
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt).first()
+
+        method_rows = db.query(
+            func.coalesce(Payment.method, "Unknown").label("method"),
+            func.count(Payment.id).label("cnt"),
+            func.coalesce(func.sum(Payment.amount), 0).label("amt"),
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt)\
+         .group_by(func.coalesce(Payment.method, "Unknown"))\
+         .order_by(func.coalesce(func.sum(Payment.amount), 0).desc())\
+         .all()
+
+        payments = db.query(Payment).options(
+            joinedload(Payment.customer).joinedload(Customer.router).joinedload(Router.branch)
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt)\
+         .order_by(Payment.paid_at.desc()).limit(500).all()
+
+    return render_template(
+        "reports/monthly_report.html",
+        username=session.get("username"),
+        role=session.get("role"),
+        start_dt=start_dt,
+        end_dt=end_dt,
+        payments_count=int(getattr(totals, "payments_count", 0) or 0),
+        total_amount=float(getattr(totals, "total_amount", 0) or 0),
+        method_rows=method_rows,
+        payments=payments,
+    )
+
+
+@app.route("/reports/yearly")
+@login_required
+@roles_required("admin", "super_admin", "staff")
+def yearly_report():
+    today = datetime.utcnow().date()
+    start_dt = datetime(today.year, 1, 1)
+    end_dt = datetime(today.year + 1, 1, 1)
+
+    with get_db() as db:
+        totals = db.query(
+            func.count(Payment.id).label("payments_count"),
+            func.coalesce(func.sum(Payment.amount), 0).label("total_amount"),
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt).first()
+
+        method_rows = db.query(
+            func.coalesce(Payment.method, "Unknown").label("method"),
+            func.count(Payment.id).label("cnt"),
+            func.coalesce(func.sum(Payment.amount), 0).label("amt"),
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt)\
+         .group_by(func.coalesce(Payment.method, "Unknown"))\
+         .order_by(func.coalesce(func.sum(Payment.amount), 0).desc())\
+         .all()
+
+        payments = db.query(Payment).options(
+            joinedload(Payment.customer).joinedload(Customer.router).joinedload(Router.branch)
+        ).filter(Payment.paid_at >= start_dt, Payment.paid_at < end_dt)\
+         .order_by(Payment.paid_at.desc()).limit(500).all()
+
+    return render_template(
+        "reports/yearly_report.html",
+        username=session.get("username"),
+        role=session.get("role"),
+        start_dt=start_dt,
+        end_dt=end_dt,
+        payments_count=int(getattr(totals, "payments_count", 0) or 0),
+        total_amount=float(getattr(totals, "total_amount", 0) or 0),
+        method_rows=method_rows,
+        payments=payments,
+    )
 
 # ==================== SCHEDULER SETUP ====================
 # # For testing: run every 5 minutes
